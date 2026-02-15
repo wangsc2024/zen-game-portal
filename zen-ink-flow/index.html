@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="description" content="禪意水墨 - 引導墨滴穿越禪境，收集禪字，在動靜之間體悟禪意">
+    <meta name="theme-color" content="#f5f0e8">
+    <title>禪意水墨 - Zen Ink Flow</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Noto Serif TC', 'Microsoft JhengHei', serif;
+            background: #f5f0e8;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            overflow: hidden;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        .back-link {
+            position: fixed;
+            top: 15px;
+            left: 15px;
+            color: #8a7e6b;
+            text-decoration: none;
+            font-size: 0.9rem;
+            z-index: 300;
+            transition: color 0.3s ease;
+        }
+        .back-link:hover { color: #3d3425; }
+
+        canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+            touch-action: none;
+            cursor: none;
+        }
+
+        /* HUD 覆蓋層 */
+        .hud {
+            position: fixed;
+            top: 0; left: 0; right: 0;
+            padding: 12px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        .hud-left, .hud-right {
+            display: flex;
+            gap: 16px;
+            align-items: center;
+        }
+
+        .hud-item {
+            text-align: center;
+            color: #5a4e3c;
+            font-size: 0.8rem;
+        }
+
+        .hud-value {
+            font-size: 1.3rem;
+            font-weight: 700;
+            color: #3d3425;
+        }
+
+        .hud-label {
+            font-size: 0.65rem;
+            color: #8a7e6b;
+            letter-spacing: 0.05em;
+        }
+
+        .pause-btn {
+            pointer-events: auto;
+            background: transparent;
+            border: 1px solid #c4b89a;
+            border-radius: 20px;
+            color: #8a7e6b;
+            padding: 6px 16px;
+            font-size: 0.8rem;
+            font-family: inherit;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .pause-btn:hover {
+            background: rgba(61,52,37,0.08);
+            border-color: #8a7e6b;
+        }
+
+        /* 覆蓋畫面 */
+        .overlay {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 200;
+            transition: opacity 0.5s ease;
+        }
+
+        .overlay.hidden { display: none; }
+
+        .overlay-menu {
+            background: rgba(245, 240, 232, 0.95);
+        }
+
+        .overlay-pause {
+            background: rgba(245, 240, 232, 0.9);
+        }
+
+        .overlay-gameover {
+            background: rgba(245, 240, 232, 0.95);
+        }
+
+        .overlay h1 {
+            font-size: clamp(2rem, 6vw, 3.5rem);
+            color: #3d3425;
+            margin-bottom: 0.3rem;
+            font-weight: 700;
+        }
+
+        .overlay .subtitle {
+            font-size: clamp(0.9rem, 2vw, 1.1rem);
+            color: #8a7e6b;
+            margin-bottom: 2rem;
+            font-style: italic;
+        }
+
+        .overlay h2 {
+            font-size: 2rem;
+            color: #3d3425;
+            margin-bottom: 1rem;
+        }
+
+        .overlay p {
+            color: #5a4e3c;
+            font-size: 0.95rem;
+            line-height: 1.8;
+            text-align: center;
+            max-width: 360px;
+            margin-bottom: 1rem;
+        }
+
+        .overlay .score-display {
+            font-size: 2.5rem;
+            font-weight: 700;
+            color: #3d3425;
+            margin: 1rem 0;
+        }
+
+        .overlay .stats-row {
+            display: flex;
+            gap: 24px;
+            margin-bottom: 1.5rem;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        .overlay .stat-box {
+            text-align: center;
+        }
+
+        .overlay .stat-box .val {
+            font-size: 1.3rem;
+            font-weight: 700;
+            color: #3d3425;
+        }
+
+        .overlay .stat-box .lbl {
+            font-size: 0.7rem;
+            color: #8a7e6b;
+        }
+
+        .btn {
+            padding: 14px 36px;
+            font-size: 1.1rem;
+            font-family: inherit;
+            font-weight: 500;
+            border: none;
+            border-radius: 30px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin: 0.4rem;
+        }
+
+        .btn-primary {
+            background: #3d3425;
+            color: #f5f0e8;
+        }
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(61,52,37,0.3);
+        }
+
+        .btn-secondary {
+            background: transparent;
+            border: 2px solid #c4b89a;
+            color: #5a4e3c;
+        }
+        .btn-secondary:hover {
+            border-color: #8a7e6b;
+        }
+
+        .instructions-hint {
+            font-size: 0.8rem;
+            color: #8a7e6b;
+            margin-top: 1rem;
+        }
+
+        .streak-badge {
+            background: linear-gradient(135deg, #c4a35a, #d4b96a);
+            color: #3d3425;
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+            display: inline-block;
+        }
+
+        .zen-quote {
+            font-style: italic;
+            color: #8a7e6b;
+            font-size: 0.95rem;
+            margin-top: 1.5rem;
+            max-width: 300px;
+            text-align: center;
+        }
+
+        /* 成就通知 */
+        .achievement-notification {
+            position: fixed;
+            top: 20px;
+            right: -320px;
+            background: #f5f0e8;
+            border: 1px solid #c4a35a;
+            border-radius: 12px;
+            padding: 14px 20px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            box-shadow: 0 8px 30px rgba(0,0,0,0.15);
+            z-index: 400;
+            transition: right 0.5s ease;
+        }
+        .achievement-notification.show { right: 20px; }
+
+        .ach-icon { font-size: 2rem; }
+        .ach-content { text-align: left; }
+        .ach-title { font-size: 0.85rem; color: #c4a35a; font-weight: 700; }
+        .ach-desc { font-size: 0.7rem; color: #8a7e6b; margin-top: 2px; }
+
+        @media (max-width: 480px) {
+            .hud { padding: 8px 12px; }
+            .hud-value { font-size: 1rem; }
+        }
+    </style>
+</head>
+<body>
+    <a href="../" class="back-link">&larr; 返回遊廊</a>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <!-- HUD -->
+    <div class="hud" id="hud" style="display:none;">
+        <div class="hud-left">
+            <div class="hud-item">
+                <div class="hud-value" id="hudScore">0</div>
+                <div class="hud-label">墨分</div>
+            </div>
+            <div class="hud-item">
+                <div class="hud-value" id="hudChars">0</div>
+                <div class="hud-label">禪字</div>
+            </div>
+        </div>
+        <div class="hud-right">
+            <div class="hud-item">
+                <div class="hud-value" id="hudCombo">0</div>
+                <div class="hud-label">連收</div>
+            </div>
+            <button class="pause-btn" id="pauseBtn">暫停</button>
+        </div>
+    </div>
+
+    <!-- 開始畫面 -->
+    <div class="overlay overlay-menu" id="menuOverlay">
+        <h1>禪意水墨</h1>
+        <p class="subtitle">Zen Ink Flow</p>
+        <div id="streakBadge" style="display:none;"></div>
+        <p>引導墨滴穿越山水禪境<br>收集散落的禪字，避開枯枝亂石<br>在動靜之間，體悟水墨之美</p>
+        <div id="menuStats" style="margin-bottom:1rem;"></div>
+        <button class="btn btn-primary" id="startBtn">開始揮墨</button>
+        <p class="instructions-hint" id="controlHint"></p>
+    </div>
+
+    <!-- 暫停畫面 -->
+    <div class="overlay overlay-pause hidden" id="pauseOverlay">
+        <h2>暫停</h2>
+        <p>片刻寧靜，也是修行</p>
+        <button class="btn btn-primary" id="resumeBtn">繼續</button>
+        <button class="btn btn-secondary" id="quitBtn">結束本局</button>
+    </div>
+
+    <!-- 結束畫面 -->
+    <div class="overlay overlay-gameover hidden" id="gameoverOverlay">
+        <h2 id="goTitle">墨盡</h2>
+        <div class="score-display" id="goScore">0</div>
+        <div class="stats-row" id="goStats"></div>
+        <div id="goRecord" style="display:none;margin-bottom:1rem;"></div>
+        <button class="btn btn-primary" id="retryBtn">再揮一局</button>
+        <button class="btn btn-secondary" id="menuBtn">回到首頁</button>
+        <div class="zen-quote" id="goQuote"></div>
+    </div>
+
+    <script src="game.js"></script>
+</body>
+</html>

@@ -1,0 +1,1171 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>正念記憶 - Mindful Memory</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Noto Sans TC', 'Microsoft JhengHei', sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+            color: #e8e8e8;
+        }
+
+        h1 {
+            font-size: clamp(1.5rem, 4vw, 2.5rem);
+            margin-bottom: 10px;
+            background: linear-gradient(90deg, #f7d794, #f8b739);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            text-shadow: 0 0 30px rgba(248, 183, 57, 0.3);
+        }
+
+        .subtitle {
+            font-size: clamp(0.8rem, 2vw, 1rem);
+            color: #a0a0a0;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        .game-info {
+            display: flex;
+            gap: 30px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        .info-item {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 10px 20px;
+            border-radius: 10px;
+            text-align: center;
+        }
+
+        .info-label {
+            font-size: 0.8rem;
+            color: #a0a0a0;
+        }
+
+        .info-value {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: #f7d794;
+        }
+
+        #game-container {
+            display: grid;
+            gap: 10px;
+            padding: 20px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 15px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+        }
+
+        .card {
+            width: clamp(60px, 15vw, 90px);
+            height: clamp(80px, 20vw, 120px);
+            background: linear-gradient(145deg, #3d5a80, #293241);
+            border-radius: 10px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: clamp(1.5rem, 4vw, 2.5rem);
+            transition: transform 0.3s, box-shadow 0.3s;
+            position: relative;
+            transform-style: preserve-3d;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+        }
+
+        .card:hover:not(.flipped):not(.matched) {
+            transform: scale(1.05);
+            box-shadow: 0 6px 20px rgba(247, 215, 148, 0.3);
+        }
+
+        .card.flipped {
+            transform: rotateY(180deg);
+        }
+
+        .card.matched {
+            background: linear-gradient(145deg, #2d6a4f, #1b4332);
+            box-shadow: 0 0 20px rgba(45, 106, 79, 0.5);
+        }
+
+        .card-face {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            backface-visibility: hidden;
+            border-radius: 10px;
+        }
+
+        .card-back {
+            background: linear-gradient(145deg, #3d5a80, #293241);
+        }
+
+        .card-back::before {
+            content: '☸';
+            font-size: clamp(1.5rem, 4vw, 2rem);
+            color: rgba(247, 215, 148, 0.5);
+        }
+
+        .card-front {
+            background: linear-gradient(145deg, #4a6fa5, #354f6f);
+            transform: rotateY(180deg);
+            flex-direction: column;
+            padding: 5px;
+        }
+
+        .card-symbol {
+            font-size: clamp(1.2rem, 3vw, 1.8rem);
+        }
+
+        .card-text {
+            font-size: clamp(0.5rem, 1.5vw, 0.7rem);
+            color: #f7d794;
+            margin-top: 5px;
+            text-align: center;
+        }
+
+        .message {
+            margin-top: 20px;
+            font-size: 1.2rem;
+            min-height: 30px;
+            text-align: center;
+            color: #a0a0a0;
+            font-style: italic;
+        }
+
+        .message.success {
+            color: #4ade80;
+            animation: glow 1s ease-in-out infinite alternate;
+        }
+
+        @keyframes glow {
+            from { text-shadow: 0 0 5px rgba(74, 222, 128, 0.5); }
+            to { text-shadow: 0 0 20px rgba(74, 222, 128, 0.8); }
+        }
+
+        .btn {
+            margin-top: 20px;
+            padding: 12px 30px;
+            font-size: 1rem;
+            background: linear-gradient(145deg, #f8b739, #f7d794);
+            border: none;
+            border-radius: 25px;
+            color: #1a1a2e;
+            cursor: pointer;
+            font-weight: bold;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .btn:hover {
+            transform: scale(1.05);
+            box-shadow: 0 5px 20px rgba(248, 183, 57, 0.4);
+        }
+
+        .instructions {
+            max-width: 600px;
+            margin-top: 30px;
+            padding: 20px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 10px;
+            font-size: 0.9rem;
+            line-height: 1.6;
+        }
+
+        .instructions h3 {
+            color: #f7d794;
+            margin-bottom: 10px;
+        }
+
+        .eightfold-path {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .path-item {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 8px;
+            border-radius: 5px;
+            text-align: center;
+            font-size: 0.8rem;
+        }
+
+        .path-item span {
+            display: block;
+            font-size: 1.2rem;
+            margin-bottom: 3px;
+        }
+
+        /* 成就通知樣式 */
+        .achievement-notification {
+            position: fixed;
+            top: 20px;
+            right: -300px;
+            background: linear-gradient(135deg, #293241 0%, #1a1a2e 100%);
+            border: 1px solid #f7d794;
+            border-radius: 12px;
+            padding: 15px 20px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
+            z-index: 200;
+            transition: right 0.5s ease;
+        }
+
+        .achievement-notification.show {
+            right: 20px;
+        }
+
+        .ach-icon {
+            font-size: 2rem;
+        }
+
+        .ach-content {
+            text-align: left;
+        }
+
+        .ach-title {
+            font-size: 0.9rem;
+            color: #f7d794;
+            font-weight: bold;
+        }
+
+        .ach-desc {
+            font-size: 0.75rem;
+            color: #a0a0a0;
+            margin-top: 2px;
+        }
+
+        /* Streak 斷裂安慰訊息 */
+        .streak-message {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: linear-gradient(135deg, #293241 0%, #1a1a2e 100%);
+            border: 1px solid #f7d794;
+            border-radius: 15px;
+            padding: 25px 35px;
+            text-align: center;
+            z-index: 150;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.5s ease;
+            max-width: 340px;
+        }
+
+        .streak-message.show {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .streak-message h3 {
+            color: #f7d794;
+            font-size: 1.2rem;
+            margin-bottom: 0.8rem;
+        }
+
+        .streak-message p {
+            color: #a0a0a0;
+            font-size: 0.95rem;
+            line-height: 1.6;
+            margin-bottom: 0.8rem;
+        }
+
+        .streak-message .encouragement {
+            color: #4ade80;
+            font-style: italic;
+            font-size: 0.9rem;
+        }
+
+        .streak-message .close-btn {
+            background: linear-gradient(145deg, #f8b739, #f7d794);
+            border: none;
+            color: #1a1a2e;
+            padding: 10px 24px;
+            font-size: 0.9rem;
+            font-weight: bold;
+            border-radius: 20px;
+            cursor: pointer;
+            margin-top: 1rem;
+            transition: transform 0.2s ease;
+        }
+
+        .streak-message .close-btn:hover {
+            transform: scale(1.05);
+        }
+
+        /* 習慣堆疊建議 */
+        .habit-stack-tip {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: linear-gradient(135deg, #2d6a4f 0%, #1b4332 100%);
+            border: 1px solid #4ade80;
+            border-radius: 12px;
+            padding: 12px 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
+            z-index: 180;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.5s ease, transform 0.5s ease;
+            max-width: 90vw;
+        }
+
+        .habit-stack-tip.show {
+            opacity: 1;
+            pointer-events: auto;
+            transform: translateX(-50%) translateY(0);
+        }
+
+        .habit-stack-tip .tip-icon {
+            font-size: 1.5rem;
+        }
+
+        .habit-stack-tip .tip-content {
+            text-align: left;
+        }
+
+        .habit-stack-tip .tip-title {
+            font-size: 0.85rem;
+            color: #4ade80;
+            font-weight: bold;
+        }
+
+        .habit-stack-tip .tip-desc {
+            font-size: 0.75rem;
+            color: #a0a0a0;
+            margin-top: 2px;
+        }
+
+        .habit-stack-tip .close-tip {
+            background: transparent;
+            border: none;
+            color: #a0a0a0;
+            font-size: 1.2rem;
+            cursor: pointer;
+            padding: 0 5px;
+            transition: color 0.2s;
+        }
+
+        .habit-stack-tip .close-tip:hover {
+            color: #f7d794;
+        }
+
+        /* 音效控制按鈕 */
+        .sound-toggle {
+            position: fixed;
+            top: 15px;
+            right: 15px;
+            width: 44px;
+            height: 44px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(247, 215, 148, 0.3);
+            color: #f7d794;
+            font-size: 1.3rem;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.3s, transform 0.2s;
+            z-index: 100;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        .sound-toggle:hover {
+            background: rgba(255, 255, 255, 0.2);
+            transform: scale(1.1);
+        }
+
+        .sound-toggle.muted {
+            color: #666;
+            border-color: rgba(102, 102, 102, 0.3);
+        }
+
+        /* 返回連結 */
+        .back-link {
+            position: fixed;
+            top: 15px;
+            left: 15px;
+            color: #a0a0a0;
+            text-decoration: none;
+            font-size: 0.9rem;
+            z-index: 300;
+            transition: color 0.3s ease;
+        }
+        .back-link:hover { color: #f7d794; }
+
+        /* 暫停覆蓋層 */
+        .pause-overlay {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(26, 26, 46, 0.85);
+            display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+            z-index: 250;
+            animation: fadeIn 0.2s ease;
+        }
+        .pause-overlay h2 {
+            font-size: 2rem; color: #f7d794; margin-bottom: 1rem;
+        }
+        .pause-overlay p {
+            color: #a0a0a0; margin-bottom: 1.5rem;
+        }
+        @keyframes fadeInPause {
+            from { opacity: 0; } to { opacity: 1; }
+        }
+    </style>
+</head>
+<body>
+    <a href="../" class="back-link">← 返回遊廊</a>
+    <button class="sound-toggle" id="soundToggle" title="音效開關">🔔</button>
+    <h1>☸ 正念記憶</h1>
+    <p class="subtitle">透過配對八正道，培養專注與覺察</p>
+
+    <div class="game-info">
+        <div class="info-item">
+            <div class="info-label">翻牌次數</div>
+            <div class="info-value" id="moves">0</div>
+        </div>
+        <div class="info-item">
+            <div class="info-label">配對成功</div>
+            <div class="info-value" id="matches">0 / 8</div>
+        </div>
+        <div class="info-item">
+            <div class="info-label">時間</div>
+            <div class="info-value" id="timer">00:00</div>
+        </div>
+        <div class="info-item">
+            <div class="info-label">連續天數</div>
+            <div class="info-value" id="streakDisplay">0</div>
+        </div>
+        <div class="info-item">
+            <div class="info-label">最佳紀錄</div>
+            <div class="info-value" id="bestDisplay">-</div>
+        </div>
+    </div>
+
+    <div id="game-container"></div>
+
+    <p class="message" id="message">翻開卡片，找出成對的八正道</p>
+
+    <button class="btn" id="restart-btn">重新開始</button>
+
+    <div class="instructions">
+        <h3>🧘 遊戲說明</h3>
+        <p>
+            翻開卡片，找出配對的八正道符號。每次只能翻開兩張卡片，
+            若符號相同則配對成功。用最少的翻牌次數完成所有配對。
+        </p>
+        <p style="margin-top: 10px; color: #a0a0a0;">
+            八正道是佛陀教導的解脫之道，在遊戲中專注觀察，培養正念覺知。
+        </p>
+        <h3 style="margin-top: 15px;">八正道</h3>
+        <div class="eightfold-path">
+            <div class="path-item"><span>👁️</span>正見</div>
+            <div class="path-item"><span>💭</span>正思惟</div>
+            <div class="path-item"><span>💬</span>正語</div>
+            <div class="path-item"><span>🙏</span>正業</div>
+            <div class="path-item"><span>⚖️</span>正命</div>
+            <div class="path-item"><span>💪</span>正精進</div>
+            <div class="path-item"><span>🧘</span>正念</div>
+            <div class="path-item"><span>🌸</span>正定</div>
+        </div>
+    </div>
+
+    <!-- Streak 斷裂安慰訊息 -->
+    <div class="streak-message" id="streakMessage">
+        <h3>🙏 歡迎回來</h3>
+        <p>連續天數已重置，但這沒關係。</p>
+        <p class="encouragement">「每一刻覺察，都是新的開始。」</p>
+        <button class="close-btn" id="closeStreakMsg">繼續練習</button>
+    </div>
+
+    <!-- 習慣堆疊建議 -->
+    <div class="habit-stack-tip" id="habitStackTip">
+        <div class="tip-icon">💡</div>
+        <div class="tip-content">
+            <div class="tip-title">習慣堆疊小技巧</div>
+            <div class="tip-desc" id="habitTipText">試著在每天喝完咖啡後來一局！</div>
+        </div>
+        <button class="close-tip" id="closeHabitTip">×</button>
+    </div>
+
+    <script>
+        // === 冥想音效系統（Web Audio API）===
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        let audioCtx = null;
+        let soundEnabled = localStorage.getItem('mindful_sound') !== 'off';
+
+        function initAudio() {
+            if (!audioCtx) {
+                audioCtx = new AudioCtx();
+            }
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+        }
+
+        // 音效控制按鈕
+        const soundToggleBtn = document.getElementById('soundToggle');
+        function updateSoundButton() {
+            soundToggleBtn.textContent = soundEnabled ? '🔔' : '🔕';
+            soundToggleBtn.classList.toggle('muted', !soundEnabled);
+        }
+        updateSoundButton();
+        soundToggleBtn.addEventListener('click', () => {
+            initAudio();
+            soundEnabled = !soundEnabled;
+            localStorage.setItem('mindful_sound', soundEnabled ? 'on' : 'off');
+            updateSoundButton();
+            if (soundEnabled) playFlipSound(); // 播放確認音
+        });
+
+        // 頌缽音效 — 金屬共鳴泛音
+        function playSingingBowl(baseFreq, duration, volume = 0.15) {
+            if (!soundEnabled || !audioCtx) return;
+            const now = audioCtx.currentTime;
+            // 基頻 + 泛音模擬頌缽共振
+            const harmonics = [1, 2.76, 4.72];
+            const volumes = [volume, volume * 0.4, volume * 0.15];
+            harmonics.forEach((h, i) => {
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = 'sine';
+                osc.frequency.value = baseFreq * h;
+                gain.gain.setValueAtTime(volumes[i], now);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.start(now);
+                osc.stop(now + duration);
+            });
+        }
+
+        // 翻牌音效 — 輕柔短促
+        function playFlipSound() {
+            if (!soundEnabled || !audioCtx) return;
+            const now = audioCtx.currentTime;
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.type = 'triangle';
+            osc.frequency.setValueAtTime(800, now);
+            osc.frequency.exponentialRampToValueAtTime(1200, now + 0.04);
+            gain.gain.setValueAtTime(0.08, now);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start(now);
+            osc.stop(now + 0.1);
+        }
+
+        // 配對成功音效 — 頌缽（音高隨配對數漸進）
+        function playMatchSound(pairIndex) {
+            if (!soundEnabled || !audioCtx) return;
+            // 從 C4 到 C5 漸進（每對升一個音階）
+            const scale = [262, 294, 330, 349, 392, 440, 494, 523];
+            const freq = scale[Math.min(pairIndex, scale.length - 1)];
+            playSingingBowl(freq, 1.8, 0.12);
+        }
+
+        // 配對失敗音效 — 低沉木魚聲
+        function playMismatchSound() {
+            if (!soundEnabled || !audioCtx) return;
+            const now = audioCtx.currentTime;
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(180, now);
+            osc.frequency.exponentialRampToValueAtTime(120, now + 0.15);
+            gain.gain.setValueAtTime(0.1, now);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start(now);
+            osc.stop(now + 0.35);
+        }
+
+        // 遊戲完成音效 — 頌缽和弦（C大三和弦展開）
+        function playCompletionSound() {
+            if (!soundEnabled || !audioCtx) return;
+            // C4 → E4 → G4 → C5 依序響起，形成和弦
+            const notes = [
+                { freq: 262, delay: 0, duration: 3.0 },
+                { freq: 330, delay: 0.3, duration: 2.7 },
+                { freq: 392, delay: 0.6, duration: 2.4 },
+                { freq: 523, delay: 1.0, duration: 2.0 }
+            ];
+            notes.forEach(n => {
+                setTimeout(() => playSingingBowl(n.freq, n.duration, 0.1), n.delay * 1000);
+            });
+            // 最後加上鈴聲
+            setTimeout(() => {
+                const now = audioCtx.currentTime;
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = 'sine';
+                osc.frequency.value = 2093; // C7 高亮鈴聲
+                gain.gain.setValueAtTime(0.06, now);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 1.5);
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.start(now);
+                osc.stop(now + 1.6);
+            }, 1500);
+        }
+
+        // 成就解鎖音效 — 清脆鈴聲三連
+        function playAchievementSound() {
+            if (!soundEnabled || !audioCtx) return;
+            const notes = [784, 988, 1319]; // G5 → B5 → E6
+            notes.forEach((freq, i) => {
+                setTimeout(() => {
+                    const now = audioCtx.currentTime;
+                    const osc = audioCtx.createOscillator();
+                    const gain = audioCtx.createGain();
+                    osc.type = 'sine';
+                    osc.frequency.value = freq;
+                    gain.gain.setValueAtTime(0.08, now);
+                    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
+                    osc.connect(gain);
+                    gain.connect(audioCtx.destination);
+                    osc.start(now);
+                    osc.stop(now + 0.45);
+                }, i * 150);
+            });
+        }
+
+        // 八正道卡片資料
+        const eightfoldPath = [
+            { symbol: '👁️', name: '正見' },
+            { symbol: '💭', name: '正思惟' },
+            { symbol: '💬', name: '正語' },
+            { symbol: '🙏', name: '正業' },
+            { symbol: '⚖️', name: '正命' },
+            { symbol: '💪', name: '正精進' },
+            { symbol: '🧘', name: '正念' },
+            { symbol: '🌸', name: '正定' }
+        ];
+
+        // 進度持久化常數
+        const STORAGE_KEY = 'mindful_memory_progress';
+
+        // 成就定義
+        const ACHIEVEMENTS = [
+            { id: 'first_win', name: '初識八正道', desc: '首次完成遊戲', requirement: 1 },
+            { id: 'perfect_16', name: '完美記憶', desc: '用 16 次或更少翻牌完成', requirement: 16, type: 'moves' },
+            { id: 'speed_60', name: '專注如一', desc: '60 秒內完成', requirement: 60, type: 'time' },
+            { id: 'streak_3', name: '持之以恆', desc: '連續 3 天練習', requirement: 3, type: 'streak' },
+            { id: 'streak_7', name: '七日精進', desc: '連續 7 天練習', requirement: 7, type: 'streak' },
+            { id: 'total_10', name: '十次修行', desc: '累計完成 10 次', requirement: 10, type: 'total' },
+            { id: 'total_50', name: '五十次圓滿', desc: '累計完成 50 次', requirement: 50, type: 'total' }
+        ];
+
+        // 遊戲狀態
+        let cards = [];
+        let flippedCards = [];
+        let matchedPairs = 0;
+        let moves = 0;
+        let gameStarted = false;
+        let timerInterval = null;
+        let seconds = 0;
+        let isProcessing = false;
+
+        // 進度追蹤
+        let progress = {
+            totalGames: 0,
+            streak: 0,
+            lastPlayDate: null,
+            achievements: [],
+            bestMoves: Infinity,
+            bestTime: Infinity
+        };
+
+        // DOM 元素
+        const gameContainer = document.getElementById('game-container');
+        const movesDisplay = document.getElementById('moves');
+        const matchesDisplay = document.getElementById('matches');
+        const timerDisplay = document.getElementById('timer');
+        const messageDisplay = document.getElementById('message');
+        const restartBtn = document.getElementById('restart-btn');
+
+        // === 進度持久化 ===
+        function loadProgress() {
+            try {
+                const saved = localStorage.getItem(STORAGE_KEY);
+                if (saved) {
+                    progress = JSON.parse(saved);
+                    if (progress.bestMoves === null) progress.bestMoves = Infinity;
+                    if (progress.bestTime === null) progress.bestTime = Infinity;
+                }
+            } catch (e) {
+                console.warn('無法載入進度', e);
+            }
+        }
+
+        function saveProgress() {
+            try {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(progress));
+            } catch (e) {
+                console.warn('無法儲存進度', e);
+            }
+        }
+
+        // 習慣堆疊建議庫
+        const HABIT_STACK_TIPS = [
+            '試著在每天喝完咖啡後來一局！',
+            '午休前玩一局，為下午提神。',
+            '睡前玩一局，讓心靜下來。',
+            '早餐後來一局，開啟專注的一天。',
+            '每天固定時間玩，更容易養成習慣。',
+            '把遊戲圖示放在手機首頁，隨時提醒自己。'
+        ];
+
+        // === 連續天數追蹤 ===
+        function getDateString() {
+            const d = new Date();
+            return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        }
+
+        function getDaysDiff(date1, date2) {
+            const d1 = new Date(date1);
+            const d2 = new Date(date2);
+            return Math.floor((d2 - d1) / (1000 * 60 * 60 * 24));
+        }
+
+        function updateStreakOnLoad() {
+            const today = getDateString();
+            const lastPlay = progress.lastPlayDate;
+            if (!lastPlay) return false;
+            const daysDiff = getDaysDiff(lastPlay, today);
+            if (daysDiff > 1) {
+                const previousStreak = progress.streak;
+                progress.streak = 0;
+                saveProgress();
+                // 只有之前有連續紀錄才顯示安慰訊息
+                return previousStreak >= 2;
+            }
+            return false;
+        }
+
+        // === Streak 安慰訊息（絕不錯過兩次原則）===
+        function showStreakBrokenMessage() {
+            const streakMessage = document.getElementById('streakMessage');
+            const closeBtn = document.getElementById('closeStreakMsg');
+            if (streakMessage) {
+                // 隨機選擇一則安慰語
+                const encouragements = [
+                    '「每一刻覺察，都是新的開始。」',
+                    '「放下過去，活在當下。」',
+                    '「重新開始，也是正精進。」',
+                    '「心無罣礙，自在前行。」'
+                ];
+                const randomMsg = encouragements[Math.floor(Math.random() * encouragements.length)];
+                const encouragementEl = streakMessage.querySelector('.encouragement');
+                if (encouragementEl) {
+                    encouragementEl.textContent = randomMsg;
+                }
+                streakMessage.classList.add('show');
+            }
+            if (closeBtn) {
+                closeBtn.addEventListener('click', () => {
+                    streakMessage.classList.remove('show');
+                }, { once: true });
+            }
+        }
+
+        // === 習慣堆疊建議（習慣堆疊原則）===
+        function showHabitStackTip() {
+            const habitTip = document.getElementById('habitStackTip');
+            const tipText = document.getElementById('habitTipText');
+            const closeBtn = document.getElementById('closeHabitTip');
+
+            if (habitTip && tipText) {
+                // 隨機選擇一則建議
+                const randomTip = HABIT_STACK_TIPS[Math.floor(Math.random() * HABIT_STACK_TIPS.length)];
+                tipText.textContent = randomTip;
+                habitTip.classList.add('show');
+
+                // 10 秒後自動隱藏
+                setTimeout(() => {
+                    habitTip.classList.remove('show');
+                }, 10000);
+            }
+
+            if (closeBtn) {
+                closeBtn.addEventListener('click', () => {
+                    habitTip.classList.remove('show');
+                }, { once: true });
+            }
+        }
+
+        function updateStreakOnComplete() {
+            const today = getDateString();
+            const lastPlay = progress.lastPlayDate;
+            if (lastPlay === today) return;
+            const daysDiff = lastPlay ? getDaysDiff(lastPlay, today) : 999;
+            if (daysDiff === 1) {
+                progress.streak++;
+            } else {
+                progress.streak = 1;
+            }
+            progress.lastPlayDate = today;
+        }
+
+        // === 成就系統 ===
+        function checkAchievements() {
+            const newAchievements = [];
+            ACHIEVEMENTS.forEach(ach => {
+                if (progress.achievements.includes(ach.id)) return;
+                let earned = false;
+                if (ach.type === 'streak') {
+                    earned = progress.streak >= ach.requirement;
+                } else if (ach.type === 'total') {
+                    earned = progress.totalGames >= ach.requirement;
+                } else if (ach.type === 'moves') {
+                    earned = moves <= ach.requirement;
+                } else if (ach.type === 'time') {
+                    earned = seconds <= ach.requirement;
+                } else {
+                    earned = progress.totalGames >= ach.requirement;
+                }
+                if (earned) {
+                    progress.achievements.push(ach.id);
+                    newAchievements.push(ach);
+                }
+            });
+            if (newAchievements.length > 0) {
+                showAchievementNotification(newAchievements[0]);
+            }
+        }
+
+        function showAchievementNotification(ach) {
+            playAchievementSound();
+            const notification = document.createElement('div');
+            notification.className = 'achievement-notification';
+            notification.innerHTML = `
+                <div class="ach-icon">🏆</div>
+                <div class="ach-content">
+                    <div class="ach-title">成就解鎖：${ach.name}</div>
+                    <div class="ach-desc">${ach.desc}</div>
+                </div>
+            `;
+            document.body.appendChild(notification);
+            setTimeout(() => notification.classList.add('show'), 100);
+            setTimeout(() => {
+                notification.classList.remove('show');
+                setTimeout(() => notification.remove(), 500);
+            }, 3000);
+        }
+
+        // === 更新統計顯示 ===
+        function updateStatsDisplay() {
+            const streakEl = document.getElementById('streakDisplay');
+            const bestEl = document.getElementById('bestDisplay');
+            if (streakEl) streakEl.textContent = progress.streak;
+            if (bestEl) {
+                if (progress.bestMoves === Infinity) {
+                    bestEl.textContent = '-';
+                } else {
+                    bestEl.textContent = progress.bestMoves;
+                }
+            }
+        }
+
+        // 洗牌函數 (Fisher-Yates)
+        function shuffle(array) {
+            const shuffled = [...array];
+            for (let i = shuffled.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+            }
+            return shuffled;
+        }
+
+        // 初始化遊戲
+        function initGame() {
+            // 載入進度（首次初始化時）
+            let wasStreakBroken = false;
+            if (progress.totalGames === 0 && progress.achievements.length === 0) {
+                loadProgress();
+                wasStreakBroken = updateStreakOnLoad();
+            }
+            updateStatsDisplay();
+
+            // 如果 Streak 被中斷，延遲顯示安慰訊息
+            if (wasStreakBroken) {
+                setTimeout(() => {
+                    showStreakBrokenMessage();
+                }, 500);
+            }
+
+            // 重置狀態
+            cards = [];
+            flippedCards = [];
+            matchedPairs = 0;
+            moves = 0;
+            gameStarted = false;
+            isProcessing = false;
+            seconds = 0;
+
+            if (timerInterval) {
+                clearInterval(timerInterval);
+                timerInterval = null;
+            }
+
+            // 更新顯示
+            movesDisplay.textContent = '0';
+            matchesDisplay.textContent = '0 / 8';
+            timerDisplay.textContent = '00:00';
+            messageDisplay.textContent = '翻開卡片，找出成對的八正道';
+            messageDisplay.className = 'message';
+
+            // 建立卡片陣列 (每個八正道出現兩次)
+            const cardData = [...eightfoldPath, ...eightfoldPath];
+            const shuffledCards = shuffle(cardData);
+
+            // 清空容器並設定格線
+            gameContainer.innerHTML = '';
+            gameContainer.style.gridTemplateColumns = 'repeat(4, 1fr)';
+
+            // 建立卡片元素
+            shuffledCards.forEach((data, index) => {
+                const card = document.createElement('div');
+                card.className = 'card';
+                card.dataset.index = index;
+                card.dataset.symbol = data.symbol;
+                card.dataset.name = data.name;
+
+                card.innerHTML = `
+                    <div class="card-face card-back"></div>
+                    <div class="card-face card-front">
+                        <span class="card-symbol">${data.symbol}</span>
+                        <span class="card-text">${data.name}</span>
+                    </div>
+                `;
+
+                card.addEventListener('click', () => flipCard(card));
+                gameContainer.appendChild(card);
+                cards.push(card);
+            });
+        }
+
+        // 翻牌
+        function flipCard(card) {
+            // 防止重複點擊或處理中
+            if (isProcessing) return;
+            if (card.classList.contains('flipped')) return;
+            if (card.classList.contains('matched')) return;
+            if (flippedCards.length >= 2) return;
+
+            // 初始化音效（需用戶互動）
+            initAudio();
+
+            // 開始計時
+            if (!gameStarted) {
+                gameStarted = true;
+                startTimer();
+            }
+
+            // 翻牌
+            playFlipSound();
+            card.classList.add('flipped');
+            flippedCards.push(card);
+
+            // 檢查配對
+            if (flippedCards.length === 2) {
+                moves++;
+                movesDisplay.textContent = moves;
+                checkMatch();
+            }
+        }
+
+        // 檢查配對
+        function checkMatch() {
+            isProcessing = true;
+            const [card1, card2] = flippedCards;
+            const isMatch = card1.dataset.symbol === card2.dataset.symbol;
+
+            if (isMatch) {
+                // 配對成功
+                playMatchSound(matchedPairs);
+                card1.classList.add('matched');
+                card2.classList.add('matched');
+                matchedPairs++;
+                matchesDisplay.textContent = `${matchedPairs} / 8`;
+
+                const matchedName = card1.dataset.name;
+                messageDisplay.textContent = `✨ ${matchedName} - 配對成功！`;
+
+                flippedCards = [];
+                isProcessing = false;
+
+                // 檢查遊戲結束
+                if (matchedPairs === 8) {
+                    endGame();
+                }
+            } else {
+                // 配對失敗，翻回
+                playMismatchSound();
+                messageDisplay.textContent = '保持正念，再試一次...';
+                setTimeout(() => {
+                    card1.classList.remove('flipped');
+                    card2.classList.remove('flipped');
+                    flippedCards = [];
+                    isProcessing = false;
+                }, 1000);
+            }
+        }
+
+        // 計時器
+        function startTimer() {
+            timerInterval = setInterval(() => {
+                seconds++;
+                const mins = Math.floor(seconds / 60).toString().padStart(2, '0');
+                const secs = (seconds % 60).toString().padStart(2, '0');
+                timerDisplay.textContent = `${mins}:${secs}`;
+            }, 1000);
+        }
+
+        // 遊戲結束
+        function endGame() {
+            clearInterval(timerInterval);
+            playCompletionSound();
+
+            // 更新進度統計
+            progress.totalGames++;
+            if (moves < progress.bestMoves) {
+                progress.bestMoves = moves;
+            }
+            if (seconds < progress.bestTime) {
+                progress.bestTime = seconds;
+            }
+
+            // 更新連續天數
+            updateStreakOnComplete();
+
+            // 檢查成就
+            checkAchievements();
+
+            // 更新顯示
+            updateStatsDisplay();
+
+            // 儲存進度
+            saveProgress();
+
+            const mins = Math.floor(seconds / 60);
+            const secs = seconds % 60;
+            const timeStr = mins > 0 ? `${mins}分${secs}秒` : `${secs}秒`;
+
+            // 顯示是否破紀錄
+            const isNewRecord = moves === progress.bestMoves || seconds === progress.bestTime;
+            const recordText = isNewRecord ? ' 🏆 新紀錄！' : '';
+
+            messageDisplay.className = 'message success';
+            messageDisplay.textContent = `🎉 圓滿完成！用了 ${moves} 次翻牌，耗時 ${timeStr}${recordText}`;
+
+            // 顯示統計與鼓勵訊息
+            setTimeout(() => {
+                const encouragements = [
+                    '八正道已入心，願你常保正念。',
+                    '專注覺察，智慧增長。',
+                    '心無罣礙，自在解脫。',
+                    '一念清淨，萬法歸一。'
+                ];
+                const randomMsg = encouragements[Math.floor(Math.random() * encouragements.length)];
+                messageDisplay.innerHTML = `🙏 ${randomMsg}<br><span style="font-size: 0.9rem; color: #a0a0a0;">累計 ${progress.totalGames} 次 | 連續 ${progress.streak} 天 | 最佳 ${progress.bestMoves} 次</span>`;
+            }, 3000);
+
+            // 顯示習慣堆疊建議（習慣堆疊原則：幫助用戶建立固定時機）
+            setTimeout(() => {
+                showHabitStackTip();
+            }, 5000);
+        }
+
+        // 重新開始按鈕
+        restartBtn.addEventListener('click', () => {
+            initAudio();
+            playFlipSound();
+            initGame();
+        });
+
+
+        // === 暫停功能 ===
+        let isPaused = false;
+
+        function togglePause() {
+            if (!gameStarted || matchedPairs === 8) return;
+            if (isPaused) {
+                resumeGame();
+            } else {
+                pauseGame();
+            }
+        }
+
+        function pauseGame() {
+            isPaused = true;
+            if (timerInterval) {
+                clearInterval(timerInterval);
+                timerInterval = null;
+            }
+            const overlay = document.createElement('div');
+            overlay.className = 'pause-overlay';
+            overlay.id = 'pauseOverlay';
+            overlay.innerHTML =
+                '<h2>遊戲暫停</h2>' +
+                '<p>按 Esc 或點擊繼續</p>' +
+                '<button class="btn" id="resumePauseBtn">繼續遊戲</button>';
+            document.body.appendChild(overlay);
+            document.getElementById('resumePauseBtn').addEventListener('click', resumeGame);
+            overlay.addEventListener('click', function(e) {
+                if (e.target === overlay) resumeGame();
+            });
+        }
+
+        function resumeGame() {
+            isPaused = false;
+            const overlay = document.getElementById('pauseOverlay');
+            if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
+            if (gameStarted && matchedPairs < 8) {
+                startTimer();
+            }
+        }
+
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                togglePause();
+            }
+        });
+
+        // 初始化
+        initGame();
+    </script>
+</body>
+</html>

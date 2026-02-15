@@ -1,0 +1,325 @@
+/*
+ * 遊戲入口網站 - 共用樣式
+ * 禪意設計語言：深色、金色點綴、寧靜留白
+ */
+
+/* 基礎重置 */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+/* 根變數 */
+:root {
+    --bg-dark: #1a1a2e;
+    --bg-medium: #16213e;
+    --bg-light: #0f3460;
+    --gold: #f4d03f;
+    --gold-dim: rgba(244, 208, 63, 0.3);
+    --cream: #e8d5b7;
+    --gray: #8892a8;
+    --card-bg: rgba(255, 255, 255, 0.05);
+    --card-border: rgba(255, 255, 255, 0.1);
+    --font-serif: 'Noto Serif TC', 'Microsoft JhengHei', serif;
+    --font-sans: 'Noto Sans TC', 'Microsoft JhengHei', sans-serif;
+}
+
+/* Body */
+body {
+    font-family: var(--font-serif);
+    background: linear-gradient(135deg, var(--bg-dark) 0%, var(--bg-medium) 50%, var(--bg-light) 100%);
+    min-height: 100vh;
+    color: var(--cream);
+    line-height: 1.6;
+}
+
+/* 容器 */
+.container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 2rem;
+}
+
+/* 頁首 */
+.header {
+    text-align: center;
+    padding: 4rem 2rem 3rem;
+}
+
+.site-title {
+    font-size: 3rem;
+    font-weight: 700;
+    background: linear-gradient(90deg, var(--gold), var(--cream));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    text-shadow: 0 0 40px var(--gold-dim);
+    margin-bottom: 0.5rem;
+}
+
+.site-subtitle {
+    font-size: 1.1rem;
+    color: var(--gray);
+    font-style: italic;
+    letter-spacing: 0.1em;
+}
+
+/* 禪意裝飾 */
+.zen-decoration {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 1rem;
+    margin: 2rem 0;
+    color: var(--gold);
+    opacity: 0.6;
+}
+
+.zen-decoration span {
+    font-size: 1.5rem;
+}
+
+.zen-line {
+    width: 60px;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--gold), transparent);
+}
+
+/* 遊戲網格 */
+.games-section {
+    padding: 2rem;
+}
+
+.section-title {
+    font-size: 1.5rem;
+    color: var(--cream);
+    margin-bottom: 2rem;
+    text-align: center;
+    font-weight: 400;
+}
+
+.games-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 2rem;
+    justify-items: center;
+}
+
+/* 遊戲卡片 */
+.game-card {
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    border-radius: 1.5rem;
+    padding: 2rem;
+    width: 100%;
+    max-width: 400px;
+    transition: all 0.4s ease;
+    position: relative;
+    overflow: hidden;
+}
+
+.game-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, transparent, var(--gold), transparent);
+    opacity: 0;
+    transition: opacity 0.4s ease;
+}
+
+.game-card:hover {
+    transform: translateY(-8px);
+    border-color: rgba(244, 208, 63, 0.3);
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3),
+                0 0 30px var(--gold-dim);
+}
+
+.game-card:hover::before {
+    opacity: 1;
+}
+
+/* 遊戲圖示 */
+.game-icon {
+    width: 80px;
+    height: 80px;
+    margin: 0 auto 1.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 2.5rem;
+    background: rgba(244, 208, 63, 0.1);
+    border: 2px solid rgba(244, 208, 63, 0.2);
+    border-radius: 50%;
+    transition: all 0.4s ease;
+}
+
+.game-card:hover .game-icon {
+    background: rgba(244, 208, 63, 0.2);
+    border-color: var(--gold);
+    box-shadow: 0 0 20px var(--gold-dim);
+    transform: scale(1.1);
+}
+
+/* 遊戲標題 */
+.game-title {
+    font-size: 1.4rem;
+    color: var(--cream);
+    margin-bottom: 0.5rem;
+    text-align: center;
+}
+
+/* 遊戲副標題 */
+.game-subtitle {
+    font-size: 0.9rem;
+    color: var(--gray);
+    text-align: center;
+    margin-bottom: 1rem;
+}
+
+/* 遊戲描述 */
+.game-description {
+    font-size: 0.95rem;
+    color: var(--gray);
+    text-align: center;
+    margin-bottom: 1.5rem;
+    line-height: 1.8;
+}
+
+/* 遊戲標籤 */
+.game-tags {
+    display: flex;
+    justify-content: center;
+    gap: 0.5rem;
+    margin-bottom: 1.5rem;
+    flex-wrap: wrap;
+}
+
+.tag {
+    font-size: 0.75rem;
+    padding: 0.25rem 0.75rem;
+    background: rgba(136, 146, 168, 0.2);
+    border-radius: 1rem;
+    color: var(--gray);
+}
+
+/* 遊玩按鈕 */
+.play-button {
+    display: block;
+    width: 100%;
+    padding: 1rem 2rem;
+    font-family: var(--font-serif);
+    font-size: 1rem;
+    color: var(--bg-dark);
+    background: linear-gradient(135deg, var(--gold), #e6c84b);
+    border: none;
+    border-radius: 0.75rem;
+    cursor: pointer;
+    text-decoration: none;
+    text-align: center;
+    transition: all 0.3s ease;
+    font-weight: 500;
+}
+
+.play-button:hover {
+    transform: scale(1.02);
+    box-shadow: 0 8px 20px rgba(244, 208, 63, 0.4);
+}
+
+.play-button:active {
+    transform: scale(0.98);
+}
+
+/* 頁尾 */
+.footer {
+    text-align: center;
+    padding: 3rem 2rem;
+    color: var(--gray);
+    font-size: 0.9rem;
+}
+
+.footer-text {
+    opacity: 0.7;
+}
+
+/* 響應式設計 */
+@media (max-width: 768px) {
+    .site-title {
+        font-size: 2rem;
+    }
+
+    .site-subtitle {
+        font-size: 0.95rem;
+    }
+
+    .header {
+        padding: 3rem 1.5rem 2rem;
+    }
+
+    .games-section {
+        padding: 1rem;
+    }
+
+    .game-card {
+        padding: 1.5rem;
+    }
+
+    .games-grid {
+        grid-template-columns: 1fr;
+        gap: 1.5rem;
+    }
+}
+
+@media (max-width: 480px) {
+    .site-title {
+        font-size: 1.75rem;
+    }
+
+    .container {
+        padding: 1rem;
+    }
+
+    .game-icon {
+        width: 60px;
+        height: 60px;
+        font-size: 2rem;
+    }
+}
+
+/* 動畫 */
+@keyframes fadeInUp {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.game-card {
+    animation: fadeInUp 0.6s ease forwards;
+}
+
+.game-card:nth-child(2) {
+    animation-delay: 0.1s;
+}
+
+.game-card:nth-child(3) {
+    animation-delay: 0.2s;
+}
+
+/* 更多遊戲佔位卡片（即將推出） */
+.game-card.coming-soon {
+    opacity: 0.6;
+    pointer-events: none;
+}
+
+.game-card.coming-soon .play-button {
+    background: var(--gray);
+    cursor: not-allowed;
+}

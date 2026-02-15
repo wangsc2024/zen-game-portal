@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <meta name="description" content="貪吃蛇 — 經典街機遊戲，支援鍵盤與觸控操控" />
+  <meta name="theme-color" content="#0f172a" />
+  <title>貪吃蛇 — 小遊戲街機</title>
+  <style>
+    /* === 基底重置 === */
+    *, *::before, *::after {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Noto Sans TC', 'Microsoft JhengHei', -apple-system, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+      overflow-x: hidden;
+    }
+
+    /* === 頁首 === */
+    .site-header {
+      width: 100%;
+      padding: 12px 20px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .site-header a {
+      color: #94a3b8;
+      text-decoration: none;
+      font-size: 0.9rem;
+      transition: color 0.2s;
+    }
+
+    .site-header a:hover {
+      color: #e2e8f0;
+    }
+
+    /* === 主區塊 === */
+    .container {
+      width: 100%;
+      max-width: 480px;
+      padding: 0 16px 24px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    h1 {
+      font-size: clamp(1.4rem, 4vw, 2rem);
+      margin-bottom: 12px;
+      color: #e2e8f0;
+      text-align: center;
+    }
+
+    /* === Canvas === */
+    #game {
+      display: block;
+      border: 2px solid #334155;
+      border-radius: 8px;
+      width: 100%;
+      max-width: 400px;
+      aspect-ratio: 1 / 1;
+      touch-action: none;
+    }
+
+    /* === 分數 === */
+    #score {
+      text-align: center;
+      margin-top: 12px;
+      font-size: 0.95rem;
+      color: #94a3b8;
+      line-height: 1.6;
+      min-height: 48px;
+    }
+
+    #score strong {
+      color: #7c3aed;
+      font-size: 1.1em;
+    }
+
+    #score small {
+      color: #64748b;
+    }
+
+    /* === 操作提示 === */
+    #instructions {
+      text-align: center;
+      margin-top: 8px;
+      color: #64748b;
+      font-size: 0.8rem;
+    }
+
+    kbd {
+      display: inline-block;
+      padding: 2px 6px;
+      margin: 0 2px;
+      font-size: 0.75rem;
+      font-family: inherit;
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 4px;
+      color: #e2e8f0;
+    }
+
+    /* === 觸控方向按鈕 === */
+    .touch-controls {
+      display: none;
+      margin-top: 16px;
+      position: relative;
+      width: 160px;
+      height: 160px;
+    }
+
+    .touch-btn {
+      position: absolute;
+      width: 52px;
+      height: 52px;
+      border-radius: 12px;
+      border: 2px solid #334155;
+      background: rgba(30, 41, 59, 0.8);
+      color: #94a3b8;
+      font-size: 1.4rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: background 0.15s, border-color 0.15s, transform 0.1s;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
+    }
+
+    .touch-btn:active {
+      background: rgba(124, 58, 237, 0.3);
+      border-color: #7c3aed;
+      transform: scale(0.92);
+    }
+
+    .touch-btn.up    { top: 0;    left: 50%; transform: translateX(-50%); }
+    .touch-btn.down  { bottom: 0; left: 50%; transform: translateX(-50%); }
+    .touch-btn.left  { top: 50%;  left: 0;   transform: translateY(-50%); }
+    .touch-btn.right { top: 50%;  right: 0;  transform: translateY(-50%); }
+
+    .touch-btn.up:active    { transform: translateX(-50%) scale(0.92); }
+    .touch-btn.down:active  { transform: translateX(-50%) scale(0.92); }
+    .touch-btn.left:active  { transform: translateY(-50%) scale(0.92); }
+    .touch-btn.right:active { transform: translateY(-50%) scale(0.92); }
+
+    /* 暫停按鈕 */
+    .pause-btn {
+      margin-top: 12px;
+      padding: 8px 24px;
+      border-radius: 20px;
+      border: 1px solid #334155;
+      background: transparent;
+      color: #94a3b8;
+      font-size: 0.85rem;
+      font-family: inherit;
+      cursor: pointer;
+      display: none;
+      transition: background 0.2s, border-color 0.2s;
+    }
+
+    .pause-btn:hover, .pause-btn:active {
+      background: rgba(124, 58, 237, 0.15);
+      border-color: #7c3aed;
+    }
+
+    /* 觸控裝置顯示觸控控制 */
+    @media (hover: none) and (pointer: coarse) {
+      .touch-controls {
+        display: block;
+      }
+      .pause-btn {
+        display: block;
+      }
+    }
+
+    /* 響應式 */
+    @media (max-width: 480px) {
+      .container {
+        padding: 0 8px 16px;
+      }
+      #score {
+        font-size: 0.85rem;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header class="site-header">
+    <a href="../">&larr; 返回列表</a>
+  </header>
+
+  <main class="container">
+    <h1>貪吃蛇</h1>
+    <canvas id="game" width="400" height="400"></canvas>
+    <p id="score">按方向鍵或點擊畫面開始</p>
+    <p id="instructions"></p>
+
+    <button class="pause-btn" id="pauseBtn">暫停</button>
+
+    <div class="touch-controls" id="touchControls">
+      <button class="touch-btn up" data-dir="up" aria-label="上">&#9650;</button>
+      <button class="touch-btn down" data-dir="down" aria-label="下">&#9660;</button>
+      <button class="touch-btn left" data-dir="left" aria-label="左">&#9664;</button>
+      <button class="touch-btn right" data-dir="right" aria-label="右">&#9654;</button>
+    </div>
+  </main>
+
+  <script src="./game.js"></script>
+</body>
+</html>

@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="description" content="念珠冥想 - 透過 108 顆念珠的點擊計數，體驗專注與寧靜">
+    <meta name="theme-color" content="#1a1a2e">
+    <title>念珠冥想 - Mala Meditation</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Noto Serif TC', serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: #e8d5b7;
+            overflow: hidden;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        .container {
+            text-align: center;
+            padding: 20px;
+            max-width: 100%;
+        }
+
+        h1 {
+            font-size: 2rem;
+            font-weight: 500;
+            margin-bottom: 0.5rem;
+            color: #f0e6d3;
+            text-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+        }
+
+        .subtitle {
+            font-size: 0.9rem;
+            color: #a89f91;
+            margin-bottom: 1.5rem;
+        }
+
+        #gameCanvas {
+            border-radius: 50%;
+            box-shadow:
+                0 0 60px rgba(232, 213, 183, 0.1),
+                0 0 120px rgba(232, 213, 183, 0.05),
+                inset 0 0 60px rgba(0, 0, 0, 0.3);
+            cursor: pointer;
+            touch-action: manipulation;
+        }
+
+        .stats {
+            margin-top: 1.5rem;
+            display: flex;
+            gap: 2rem;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .stat-item {
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 2rem;
+            font-weight: 700;
+            color: #f0e6d3;
+        }
+
+        .stat-label {
+            font-size: 0.8rem;
+            color: #a89f91;
+            margin-top: 0.25rem;
+        }
+
+        .breath-guide {
+            margin-top: 1.5rem;
+            font-size: 1.1rem;
+            color: #c9b896;
+            min-height: 2rem;
+            transition: opacity 0.5s ease;
+        }
+
+        .instruction {
+            margin-top: 1rem;
+            font-size: 0.85rem;
+            color: #7a7265;
+        }
+
+        /* 模式選擇按鈕 */
+        .mode-selector {
+            margin-bottom: 1.5rem;
+            display: flex;
+            gap: 0.8rem;
+            justify-content: center;
+        }
+
+        .mode-btn {
+            background: transparent;
+            border: 1px solid #7a7265;
+            color: #a89f91;
+            padding: 8px 16px;
+            font-size: 0.85rem;
+            font-family: 'Noto Serif TC', serif;
+            border-radius: 20px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .mode-btn:hover {
+            border-color: #c9b896;
+            color: #c9b896;
+        }
+
+        .mode-btn.active {
+            background: rgba(201, 184, 150, 0.15);
+            border-color: #c9b896;
+            color: #f0e6d3;
+        }
+
+        .mode-btn .mode-label {
+            display: block;
+            font-size: 0.7rem;
+            color: #7a7265;
+            margin-top: 2px;
+        }
+
+        .mode-btn.active .mode-label {
+            color: #a89f91;
+        }
+
+        /* Streak 斷裂安慰訊息 */
+        .streak-message {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: linear-gradient(135deg, #2d2d4a 0%, #1a1a2e 100%);
+            border: 1px solid #c9b896;
+            border-radius: 15px;
+            padding: 25px 35px;
+            text-align: center;
+            z-index: 150;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.5s ease;
+            max-width: 320px;
+        }
+
+        .streak-message.show {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .streak-message h3 {
+            color: #f0e6d3;
+            font-size: 1.2rem;
+            margin-bottom: 0.8rem;
+        }
+
+        .streak-message p {
+            color: #a89f91;
+            font-size: 0.95rem;
+            line-height: 1.6;
+            margin-bottom: 1rem;
+        }
+
+        .streak-message .encouragement {
+            color: #c9b896;
+            font-style: italic;
+            font-size: 0.85rem;
+        }
+
+        .streak-message .close-btn {
+            background: transparent;
+            border: 1px solid #7a7265;
+            color: #a89f91;
+            padding: 8px 20px;
+            font-size: 0.85rem;
+            font-family: 'Noto Serif TC', serif;
+            border-radius: 20px;
+            cursor: pointer;
+            margin-top: 1rem;
+            transition: all 0.3s ease;
+        }
+
+        .streak-message .close-btn:hover {
+            border-color: #c9b896;
+            color: #c9b896;
+        }
+
+        .completion-message {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(26, 26, 46, 0.95);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.8s ease;
+        }
+
+        .completion-message.show {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .completion-message h2 {
+            font-size: 2rem;
+            color: #f0e6d3;
+            margin-bottom: 1rem;
+        }
+
+        .completion-message p {
+            font-size: 1.1rem;
+            color: #c9b896;
+            margin-bottom: 2rem;
+            max-width: 300px;
+            line-height: 1.8;
+        }
+
+        .restart-btn {
+            background: transparent;
+            border: 1px solid #c9b896;
+            color: #c9b896;
+            padding: 12px 32px;
+            font-size: 1rem;
+            font-family: 'Noto Serif TC', serif;
+            border-radius: 30px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .restart-btn:hover {
+            background: rgba(201, 184, 150, 0.1);
+            transform: scale(1.05);
+        }
+
+        .back-link {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            color: #7a7265;
+            text-decoration: none;
+            font-size: 0.9rem;
+            transition: color 0.3s ease;
+        }
+
+        .back-link:hover {
+            color: #c9b896;
+        }
+
+        @media (max-width: 480px) {
+            h1 { font-size: 1.6rem; }
+            .stat-value { font-size: 1.5rem; }
+            .stats { gap: 1.5rem; }
+        }
+
+        /* 成就通知樣式 */
+        .achievement-notification {
+            position: fixed;
+            top: 20px;
+            right: -300px;
+            background: linear-gradient(135deg, #2d2d4a 0%, #1a1a2e 100%);
+            border: 1px solid #c9b896;
+            border-radius: 12px;
+            padding: 15px 20px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
+            z-index: 200;
+            transition: right 0.5s ease;
+        }
+
+        .achievement-notification.show {
+            right: 20px;
+        }
+
+        .ach-icon {
+            font-size: 2rem;
+        }
+
+        .ach-content {
+            text-align: left;
+        }
+
+        .ach-title {
+            font-size: 0.9rem;
+            color: #f0e6d3;
+            font-weight: 500;
+        }
+
+        .ach-desc {
+            font-size: 0.75rem;
+            color: #a89f91;
+            margin-top: 2px;
+        }
+    </style>
+</head>
+<body>
+    <a href="../" class="back-link">← 返回遊廊</a>
+
+    <div class="container">
+        <h1>念珠冥想</h1>
+        <p class="subtitle">Mala Meditation</p>
+
+        <div class="mode-selector">
+            <button class="mode-btn" id="quickMode" data-beads="27">
+                快速模式
+                <span class="mode-label">27 顆 · 約 1 分鐘</span>
+            </button>
+            <button class="mode-btn active" id="fullMode" data-beads="108">
+                完整模式
+                <span class="mode-label">108 顆 · 約 5 分鐘</span>
+            </button>
+        </div>
+
+        <canvas id="gameCanvas" width="320" height="320"></canvas>
+
+        <div class="stats">
+            <div class="stat-item">
+                <div class="stat-value" id="countDisplay">0</div>
+                <div class="stat-label">念珠</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-value" id="roundDisplay">0</div>
+                <div class="stat-label">本次圈數</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-value" id="streakDisplay">0</div>
+                <div class="stat-label">連續天數</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-value" id="totalDisplay">0</div>
+                <div class="stat-label">累計圈數</div>
+            </div>
+        </div>
+
+        <div class="breath-guide" id="breathGuide">點擊念珠開始</div>
+
+        <p class="instruction">每 108 顆為一圈，隨呼吸節奏點擊</p>
+    </div>
+
+    <div class="completion-message" id="completionMessage">
+        <h2>圓滿</h2>
+        <p>一圈 108 顆念珠已完成<br>心念歸一，自在清淨</p>
+        <button class="restart-btn" id="restartBtn">再修一圈</button>
+    </div>
+
+    <!-- Streak 斷裂安慰訊息 -->
+    <div class="streak-message" id="streakMessage">
+        <h3>🙏 歡迎回來</h3>
+        <p>連續天數已重置，但這沒關係。</p>
+        <p class="encouragement">「重新開始，也是一種修行。」</p>
+        <button class="close-btn" id="closeStreakMsg">繼續練習</button>
+    </div>
+
+    <script src="game.js"></script>
+</body>
+</html>
