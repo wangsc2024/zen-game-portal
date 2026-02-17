@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
-  <meta name="description" content="貪吃蛇 — 經典街機遊戲，支援鍵盤與觸控操控" />
+  <meta name="description" content="貪吃蛇 — 經典街機遊戲，道具系統版，支援鍵盤與觸控操控" />
   <meta name="theme-color" content="#0f172a" />
   <title>貪吃蛇 — 小遊戲街機</title>
   <style>
@@ -73,6 +73,7 @@
       max-width: 400px;
       aspect-ratio: 1 / 1;
       touch-action: none;
+      cursor: pointer;
     }
 
     /* === 分數 === */
@@ -157,6 +158,38 @@
     .touch-btn.left:active  { transform: translateY(-50%) scale(0.92); }
     .touch-btn.right:active { transform: translateY(-50%) scale(0.92); }
 
+    /* 道具圖例 */
+    .powerup-legend {
+      display: flex;
+      justify-content: center;
+      gap: 12px;
+      margin-top: 10px;
+      flex-wrap: wrap;
+    }
+
+    .powerup-item {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 0.72rem;
+      color: #64748b;
+    }
+
+    .powerup-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      display: inline-block;
+    }
+
+    /* Combo 提示 */
+    .combo-hint {
+      margin-top: 6px;
+      font-size: 0.72rem;
+      color: #fbbf24;
+      text-align: center;
+    }
+
     /* 暫停按鈕 */
     .pause-btn {
       margin-top: 12px;
@@ -168,7 +201,6 @@
       font-size: 0.85rem;
       font-family: inherit;
       cursor: pointer;
-      display: none;
       transition: background 0.2s, border-color 0.2s;
     }
 
@@ -177,12 +209,14 @@
       border-color: #7c3aed;
     }
 
+    /* 暫停按鈕：桌面與觸控裝置皆顯示 */
+    .pause-btn {
+      display: block;
+    }
+
     /* 觸控裝置顯示觸控控制 */
     @media (hover: none) and (pointer: coarse) {
       .touch-controls {
-        display: block;
-      }
-      .pause-btn {
         display: block;
       }
     }
@@ -208,6 +242,13 @@
     <canvas id="game" width="400" height="400"></canvas>
     <p id="score">按方向鍵或點擊畫面開始</p>
     <p id="instructions"></p>
+    <div class="powerup-legend">
+      <span class="powerup-item"><span class="powerup-dot" style="background:#38bdf8;"></span>減速</span>
+      <span class="powerup-item"><span class="powerup-dot" style="background:#22c55e;"></span>縮短+5</span>
+      <span class="powerup-item"><span class="powerup-dot" style="background:#a855f7;"></span>傳送</span>
+      <span class="powerup-item"><span class="powerup-dot" style="background:#f1f5f9;"></span>護盾</span>
+    </div>
+    <p class="combo-hint">連續吃食物觸發 Combo 加分！</p>
 
     <button class="pause-btn" id="pauseBtn">暫停</button>
 

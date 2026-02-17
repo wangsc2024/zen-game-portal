@@ -13,6 +13,12 @@
  * - 成就系統解鎖
  * - 最佳紀錄挑戰
  * - LocalStorage 進度持久化
+ *
+ * 視覺效果系統（2026-02-16）：
+ * - 粒子系統：點擊產生金色粒子飄散
+ * - 漣漪效果：點擊產生擴散漣漪
+ * - 光芒軌跡：已點亮念珠之間微光連線
+ * - 慶祝動畫：完成一圈時中心噴發粒子
  */
 
 (function() {
@@ -85,6 +91,151 @@
 
     // 預計算的珠子位置（避免每幀計算）
     let beadPositions = [];
+
+    // === 粒子系統（物件池，避免頻繁 GC） ===
+    const PARTICLE_POOL_SIZE = 60;
+    const particlePool = [];
+    let activeParticleCount = 0;
+
+    function createParticle() {
+        return {
+            x: 0, y: 0, vx: 0, vy: 0,
+            life: 0, maxLife: 0, size: 0,
+            alpha: 0, active: false, type: 'spark'
+        };
+    }
+
+    // 預建物件池
+    for (let i = 0; i < PARTICLE_POOL_SIZE; i++) {
+        particlePool.push(createParticle());
+    }
+
+    function spawnParticle(x, y, vx, vy, life, size, type) {
+        for (let i = 0; i < PARTICLE_POOL_SIZE; i++) {
+            const p = particlePool[i];
+            if (!p.active) {
+                p.x = x; p.y = y; p.vx = vx; p.vy = vy;
+                p.life = life; p.maxLife = life; p.size = size;
+                p.alpha = 1; p.active = true; p.type = type || 'spark';
+                activeParticleCount++;
+                return;
+            }
+        }
+    }
+
+    function emitClickParticles(x, y) {
+        // 5-8 個金色粒子向上飄散
+        const particleCount = 5 + (Math.random() * 3 | 0);
+        for (let i = 0; i < particleCount; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const speed = 0.3 + Math.random() * 0.8;
+            spawnParticle(
+                x, y,
+                Math.cos(angle) * speed,
+                Math.sin(angle) * speed - 0.3,
+                40 + (Math.random() * 20 | 0),
+                2 + Math.random() * 2,
+                'spark'
+            );
+        }
+        // 漣漪擴散效果
+        spawnParticle(x, y, 0, 0, 30, 3, 'ripple');
+    }
+
+    function emitCelebrationParticles() {
+        // 完成一圈的慶祝動畫：大量粒子從中心噴發
+        for (let i = 0; i < 30; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const speed = 0.5 + Math.random() * 1.5;
+            spawnParticle(
+                CENTER_X, CENTER_Y,
+                Math.cos(angle) * speed,
+                Math.sin(angle) * speed - 0.5,
+                60 + (Math.random() * 40 | 0),
+                2 + Math.random() * 3,
+                'spark'
+            );
+        }
+        // 多層漣漪
+        for (let i = 0; i < 3; i++) {
+            spawnParticle(CENTER_X, CENTER_Y, 0, 0, 50 + i * 10, 5, 'ripple');
+        }
+    }
+
+    function updateParticles() {
+        for (let i = 0; i < PARTICLE_POOL_SIZE; i++) {
+            const p = particlePool[i];
+            if (!p.active) continue;
+
+            p.life--;
+            if (p.life <= 0) {
+                p.active = false;
+                activeParticleCount--;
+                continue;
+            }
+
+            p.alpha = p.life / p.maxLife;
+
+            if (p.type === 'spark') {
+                p.x += p.vx;
+                p.y += p.vy;
+                p.vy += 0.01; // 微弱重力，模擬香灰飄散
+                p.size *= 0.98; // 逐漸縮小
+            }
+            // ripple 不需位移，只靠 life/maxLife 控制擴散
+        }
+    }
+
+    function renderParticles() {
+        for (let i = 0; i < PARTICLE_POOL_SIZE; i++) {
+            const p = particlePool[i];
+            if (!p.active) continue;
+
+            if (p.type === 'spark') {
+                // 金色粒子本體
+                ctx.globalAlpha = p.alpha * 0.9;
+                ctx.fillStyle = COLORS.beadActive;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+                ctx.fill();
+
+                // 粒子光暈
+                ctx.globalAlpha = p.alpha * 0.3;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.size * 2.5, 0, Math.PI * 2);
+                ctx.fill();
+
+            } else if (p.type === 'ripple') {
+                // 漣漪擴散圈
+                const rippleProgress = 1 - (p.life / p.maxLife);
+                const radius = p.size + rippleProgress * 25;
+                ctx.globalAlpha = p.alpha * 0.4;
+                ctx.strokeStyle = COLORS.beadActive;
+                ctx.lineWidth = 1.5 * p.alpha;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
+                ctx.stroke();
+            }
+        }
+        ctx.globalAlpha = 1;
+    }
+
+    // === 光芒軌跡（已點亮珠子之間的微光連線） ===
+    function renderLightTrail() {
+        if (count < 2) return;
+
+        ctx.save();
+        ctx.globalAlpha = 0.12;
+        ctx.strokeStyle = COLORS.beadActive;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(beadPositions[0].x, beadPositions[0].y);
+        for (let i = 1; i < count; i++) {
+            ctx.lineTo(beadPositions[i].x, beadPositions[i].y);
+        }
+        ctx.stroke();
+        ctx.restore();
+    }
 
     // === DOM 元素 ===
     let countDisplay, roundDisplay, breathGuide, completionMessage, restartBtn;
@@ -379,6 +530,9 @@
                 breathGuide.textContent = BREATH_MESSAGES[breathPhase];
             }
         }
+
+        // 更新粒子系統
+        updateParticles();
     }
 
     // === 渲染 ===
@@ -393,8 +547,14 @@
         // 繪製軌道環
         drawRings();
 
+        // 繪製光芒軌跡（在珠子底層）
+        renderLightTrail();
+
         // 繪製所有珠子（批次繪製優化）
         drawBeads();
+
+        // 繪製粒子效果（在珠子上層）
+        renderParticles();
     }
 
     // === 繪製中心光暈 ===
@@ -512,6 +672,10 @@
         count++;
         countDisplay.textContent = count;
 
+        // 觸發粒子效果（從剛點亮的念珠位置噴出）
+        const bead = beadPositions[count - 1];
+        emitClickParticles(bead.x, bead.y);
+
         // 首次點擊啟動呼吸引導
         if (count === 1) {
             breathGuide.textContent = BREATH_MESSAGES[0];
@@ -521,6 +685,7 @@
         if (count >= TOTAL_BEADS) {
             rounds++;
             roundDisplay.textContent = rounds;
+            emitCelebrationParticles();
             showCompletion();
         }
     }

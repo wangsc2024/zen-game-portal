@@ -1,5 +1,5 @@
 /**
- * 貪吃蛇 - 品質優化版
+ * 貪吃蛇 - 道具系統版
  *
  * 品質改善項目：
  * 1. [P0] 遊戲循環從 setInterval 改為 requestAnimationFrame + 固定時間步長
@@ -9,12 +9,21 @@
  * 5. [P1] 新增 Esc 暫停支援
  * 6. [P2] 完整狀態機（menu → playing → paused → gameover）
  * 7. 保留原有功能：金色食物、速度漸進、音效、高分紀錄、輸入緩衝
+ * 8. [NEW] 道具系統：冰凍減速、毒食物縮短、傳送門、護盾保護
  *
  * 效能優化（參考知識庫 HTML5 遊戲開發指南）：
  * - requestAnimationFrame 自動暫停不可見頁面
  * - 整數座標避免子像素渲染
  * - 批次繪製減少 context 切換
  * - 固定時間步長確保跨裝置一致的遊戲速度
+ *
+ * 2026-02-17 優化：
+ * - [P0] 粒子系統改用物件池 + swap-and-pop，消除 splice 的 O(n) 搬移及 GC 壓力
+ * - [P1] 新增 Canvas 滑鼠 click 事件（桌面用戶可直接點擊開始）
+ * - [P1] Combo 連擊系統（連續吃食物加分，視覺 + 音效回饋）
+ * - [P1] 速度里程碑提示（每升 2 級 Canvas 內顯示提示文字）
+ * - [P2] 遊戲結束畫面增強（存活時間、吃食物數、最長 Combo）
+ * - [P2] 蛇身顏色快取（預計算漸層顏色陣列，避免每幀逐段重算）
  */
 
 (function () {
@@ -50,6 +59,77 @@
   let shakeFrames = 0;
   let lastTickTime = 0;
   let accumulator = 0;
+
+  // === 開場無敵期（新手友好）===
+  var gracePeriodTicks = 0;  // 開場免死 tick 數
+
+  // === Combo 連擊系統 ===
+  var comboCount = 0;        // 連續吃食物次數
+  var comboTimer = 0;        // Combo 有效倒數（tick 數）
+  var COMBO_WINDOW = 12;     // 吃完食物後的 Combo 有效 tick 窗口
+  var maxCombo = 0;          // 本局最長 Combo
+  var comboDisplayTimer = 0; // Combo 提示文字顯示倒計時（幀數）
+  var comboDisplayText = ''; // Combo 提示文字內容
+
+  // === 速度里程碑 ===
+  var lastSpeedLevel = 0;         // 上次顯示里程碑的速度等級
+  var milestoneDisplayTimer = 0;  // 里程碑提示文字顯示倒計時（幀數）
+  var milestoneDisplayText = '';   // 里程碑提示文字內容
+
+  // === 遊戲統計（遊戲結束畫面用）===
+  var gameStartTime = 0;    // 遊戲開始時間戳
+  var totalFoodEaten = 0;   // 吃掉的食物總數（普通 + 金色 + 道具）
+
+  // === 蛇身顏色快取 ===
+  var snakeColorCache = [];      // 預計算的蛇身顏色陣列
+  var snakeColorCacheLen = 0;    // 快取有效長度
+
+  function updateSnakeColorCache(length) {
+    if (length <= 1) return;
+    // 只在長度變化時重算
+    if (snakeColorCacheLen === length) return;
+    snakeColorCacheLen = length;
+    var maxIdx = length - 1;
+    // 確保陣列長度足夠
+    while (snakeColorCache.length < length) {
+      snakeColorCache.push('');
+    }
+    for (var i = 1; i < length; i++) {
+      var ratio = i / maxIdx;
+      var r = (124 + ratio * 43 + 0.5) | 0;
+      var g = (58 + ratio * 81 + 0.5) | 0;
+      var b = (237 + ratio * 13 + 0.5) | 0;
+      snakeColorCache[i] = 'rgb(' + r + ',' + g + ',' + b + ')';
+    }
+  }
+
+  // === 道具系統 ===
+  // 特殊食物類型定義
+  var PowerUpType = {
+    FREEZE: 'freeze',     // 冰凍減速
+    POISON: 'poison',     // 毒食物（縮短蛇身 +5 分）
+    PORTAL: 'portal',     // 傳送門
+    SHIELD: 'shield'      // 護盾（免疫一次自撞）
+  };
+
+  var POWERUP_COLORS = {
+    freeze: '#38bdf8',   // 天藍
+    poison: '#22c55e',   // 綠色
+    portal: '#a855f7',   // 紫色
+    shield: '#f1f5f9'    // 白色
+  };
+
+  var POWERUP_SYMBOLS = {
+    freeze: '\u2744',    // ❄
+    poison: '\u2620',    // ☠
+    portal: '\u00d7',    // ×（旋轉顯示成渦旋效果）
+    shield: '\u2606'     // ☆
+  };
+
+  var powerUpFood = null;    // { x, y, type, ttl }
+  var freezeTimer = 0;       // 冰凍剩餘 tick 數
+  var hasShield = false;     // 護盾狀態
+  var powerUpSpawnCD = 0;    // 特殊食物生成冷卻（避免同時出現太多）
 
   // === DOM 元素 ===
   const canvas = document.getElementById('game');
@@ -124,6 +204,44 @@
     setTimeout(function () { playTone(659, 0.12, 'sine', 0.2); }, 120);
   }
 
+  // Combo 音效（音高隨 Combo 數遞增）
+  function playComboSound(combo) {
+    var baseFreq = 600 + Math.min(combo, 10) * 80;
+    playTone(baseFreq, 0.06, 'sine', 0.15);
+    setTimeout(function () { playTone(baseFreq * 1.25, 0.08, 'sine', 0.12); }, 30);
+  }
+
+  // 道具音效
+  function playFreezeSound() {
+    playTone(880, 0.06, 'sine', 0.2);
+    setTimeout(function () { playTone(1320, 0.1, 'sine', 0.15); }, 40);
+    setTimeout(function () { playTone(1760, 0.15, 'sine', 0.1); }, 80);
+  }
+
+  function playPoisonSound() {
+    playTone(200, 0.1, 'sawtooth', 0.25);
+    setTimeout(function () { playTone(300, 0.08, 'sawtooth', 0.2); }, 60);
+    setTimeout(function () { playTone(500, 0.12, 'sine', 0.15); }, 120);
+  }
+
+  function playPortalSound() {
+    playTone(400, 0.05, 'sine', 0.2);
+    setTimeout(function () { playTone(600, 0.05, 'sine', 0.2); }, 30);
+    setTimeout(function () { playTone(800, 0.05, 'sine', 0.2); }, 60);
+    setTimeout(function () { playTone(1200, 0.1, 'sine', 0.15); }, 90);
+  }
+
+  function playShieldSound() {
+    playTone(660, 0.08, 'triangle', 0.2);
+    setTimeout(function () { playTone(880, 0.1, 'triangle', 0.2); }, 50);
+    setTimeout(function () { playTone(1100, 0.15, 'triangle', 0.15); }, 100);
+  }
+
+  function playShieldBreakSound() {
+    playTone(440, 0.1, 'triangle', 0.3);
+    setTimeout(function () { playTone(330, 0.15, 'triangle', 0.2); }, 80);
+  }
+
   // === 高分紀錄 ===
   function loadHighScore() {
     try {
@@ -146,45 +264,59 @@
     return false;
   }
 
-  // === 粒子效果系統 ===
-  var particles = [];
-  var MAX_PARTICLES = 30;
+  // === 粒子效果系統（物件池 + swap-and-pop 優化）===
+  var MAX_PARTICLES = 40;
+  var particlePool = [];
+  var activeParticleCount = 0;
+
+  // 預分配粒子物件池，避免運行時 GC 壓力
+  for (var _pi = 0; _pi < MAX_PARTICLES; _pi++) {
+    particlePool.push({ x: 0, y: 0, vx: 0, vy: 0, life: 0, decay: 0, size: 0, color: '' });
+  }
 
   function spawnEatParticles(cellX, cellY, color) {
     var centerX = cellX * CELL + CELL / 2;
     var centerY = cellY * CELL + CELL / 2;
-    var count = Math.min(8, MAX_PARTICLES - particles.length);
+    var count = Math.min(8, MAX_PARTICLES - activeParticleCount);
     for (var i = 0; i < count; i++) {
+      var p = particlePool[activeParticleCount];
       var angle = (Math.PI * 2 * i) / count + Math.random() * 0.5;
       var speed = 1.5 + Math.random() * 2;
-      particles.push({
-        x: centerX,
-        y: centerY,
-        vx: Math.cos(angle) * speed,
-        vy: Math.sin(angle) * speed,
-        life: 1.0,
-        decay: 0.03 + Math.random() * 0.02,
-        size: 2 + Math.random() * 3,
-        color: color
-      });
+      p.x = centerX;
+      p.y = centerY;
+      p.vx = Math.cos(angle) * speed;
+      p.vy = Math.sin(angle) * speed;
+      p.life = 1.0;
+      p.decay = 0.03 + Math.random() * 0.02;
+      p.size = 2 + Math.random() * 3;
+      p.color = color;
+      activeParticleCount++;
     }
   }
 
   function updateParticles() {
-    for (var i = particles.length - 1; i >= 0; i--) {
-      var p = particles[i];
+    var i = 0;
+    while (i < activeParticleCount) {
+      var p = particlePool[i];
       p.x += p.vx;
       p.y += p.vy;
       p.life -= p.decay;
       if (p.life <= 0) {
-        particles.splice(i, 1);
+        // swap-and-pop: 用最後一個活躍粒子覆蓋當前位置，避免 splice 的 O(n) 搬移
+        activeParticleCount--;
+        var last = particlePool[activeParticleCount];
+        particlePool[i] = last;
+        particlePool[activeParticleCount] = p;
+        // 不遞增 i，交換後的粒子還沒檢查
+      } else {
+        i++;
       }
     }
   }
 
   function drawParticles() {
-    for (var i = 0; i < particles.length; i++) {
-      var p = particles[i];
+    for (var i = 0; i < activeParticleCount; i++) {
+      var p = particlePool[i];
       ctx.globalAlpha = p.life;
       ctx.fillStyle = p.color;
       ctx.beginPath();
@@ -195,6 +327,14 @@
   }
 
   // === 食物生成 ===
+  function isOccupied(x, y) {
+    if (snake.some(function (s) { return s.x === x && s.y === y; })) return true;
+    if (food && food.x === x && food.y === y) return true;
+    if (goldenFood && goldenFood.x === x && goldenFood.y === y) return true;
+    if (powerUpFood && powerUpFood.x === x && powerUpFood.y === y) return true;
+    return false;
+  }
+
   function spawnFood() {
     var pos;
     do {
@@ -202,10 +342,7 @@
         x: (Math.random() * COLS) | 0,
         y: (Math.random() * ROWS) | 0
       };
-    } while (
-      snake.some(function (s) { return s.x === pos.x && s.y === pos.y; }) ||
-      (goldenFood && goldenFood.x === pos.x && goldenFood.y === pos.y)
-    );
+    } while (isOccupied(pos.x, pos.y));
     return pos;
   }
 
@@ -217,18 +354,77 @@
           x: (Math.random() * COLS) | 0,
           y: (Math.random() * ROWS) | 0
         };
-      } while (
-        snake.some(function (s) { return s.x === pos.x && s.y === pos.y; }) ||
-        (food && food.x === pos.x && food.y === pos.y)
-      );
+      } while (isOccupied(pos.x, pos.y));
       goldenFood = { x: pos.x, y: pos.y, ttl: 50 };
     }
+  }
+
+  function maybeSpawnPowerUp() {
+    if (powerUpFood || powerUpSpawnCD > 0) return;
+    if (Math.random() >= 0.20) return; // 20% 機率
+
+    var types = [PowerUpType.FREEZE, PowerUpType.POISON, PowerUpType.PORTAL, PowerUpType.SHIELD];
+    var type = types[(Math.random() * types.length) | 0];
+
+    // 毒食物需要蛇身至少 4 節才有意義
+    if (type === PowerUpType.POISON && snake.length < 4) {
+      type = PowerUpType.FREEZE;
+    }
+    // 護盾已有則換成冰凍
+    if (type === PowerUpType.SHIELD && hasShield) {
+      type = PowerUpType.FREEZE;
+    }
+
+    var pos;
+    do {
+      pos = {
+        x: (Math.random() * COLS) | 0,
+        y: (Math.random() * ROWS) | 0
+      };
+    } while (isOccupied(pos.x, pos.y));
+
+    powerUpFood = { x: pos.x, y: pos.y, type: type, ttl: 40 };
+    powerUpSpawnCD = 8; // 至少間隔 8 tick 才再生成
   }
 
   // === 速度漸進（放緩曲線：每 8 分加速 5ms，最低 60ms）===
   function calculateSpeed() {
     var speedBonus = ((score / 8) | 0) * 5;
-    return Math.max(60, baseSpeed - speedBonus);
+    var base = Math.max(60, baseSpeed - speedBonus);
+    // 冰凍效果：速度加倍（移動變慢）
+    if (freezeTimer > 0) {
+      return base * 2;
+    }
+    return base;
+  }
+
+  // === 速度等級計算 ===
+  function getSpeedLevel() {
+    return (score / 8) | 0;
+  }
+
+  // === Combo 處理 ===
+  function onFoodEaten() {
+    totalFoodEaten++;
+    if (comboTimer > 0) {
+      comboCount++;
+    } else {
+      comboCount = 1;
+    }
+    comboTimer = COMBO_WINDOW;
+
+    if (comboCount > maxCombo) {
+      maxCombo = comboCount;
+    }
+
+    // Combo >= 3 時給予額外加分和視覺回饋
+    if (comboCount >= 3) {
+      var bonus = Math.min(comboCount - 2, 5); // 最多額外 +5
+      score += bonus;
+      comboDisplayText = comboCount + 'x COMBO! +' + bonus;
+      comboDisplayTimer = 60; // 顯示約 1 秒
+      playComboSound(comboCount);
+    }
   }
 
   // === 遊戲邏輯 tick ===
@@ -246,10 +442,25 @@
       y: (snake[0].y + dir.y + ROWS) % ROWS
     };
 
-    // 碰撞檢測（自撞）
+    // 無敵期倒數
+    if (gracePeriodTicks > 0) gracePeriodTicks--;
+
+    // 碰撞檢測（自撞）— 無敵期或護盾可免疫
     if (snake.some(function (s) { return s.x === head.x && s.y === head.y; })) {
-      onGameOver();
-      return;
+      if (gracePeriodTicks > 0) {
+        // 無敵期內免死，繼續遊戲
+      } else if (hasShield) {
+        hasShield = false;
+        playShieldBreakSound();
+        spawnEatParticles(head.x, head.y, '#f1f5f9');
+        shakeFrames = 6;
+        currentSpeed = calculateSpeed();
+        updateScoreDisplay();
+        return;
+      } else {
+        onGameOver();
+        return;
+      }
     }
 
     snake.unshift(head);
@@ -265,6 +476,14 @@
       ate = true;
       snake.push({ x: snake[snake.length - 1].x, y: snake[snake.length - 1].y });
       snake.push({ x: snake[snake.length - 1].x, y: snake[snake.length - 1].y });
+      onFoodEaten();
+    }
+    // 特殊食物（道具）
+    else if (powerUpFood && head.x === powerUpFood.x && head.y === powerUpFood.y) {
+      onCollectPowerUp(powerUpFood);
+      powerUpFood = null;
+      ate = true; // 某些道具不增長，但標記 ate 防止尾巴縮
+      onFoodEaten();
     }
     // 普通食物
     else if (food && head.x === food.x && head.y === food.y) {
@@ -274,6 +493,8 @@
       food = spawnFood();
       ate = true;
       maybeSpawnGoldenFood();
+      maybeSpawnPowerUp();
+      onFoodEaten();
     }
 
     if (!ate) {
@@ -288,8 +509,94 @@
       }
     }
 
+    // 特殊食物計時
+    if (powerUpFood) {
+      powerUpFood.ttl--;
+      if (powerUpFood.ttl <= 0) {
+        powerUpFood = null;
+      }
+    }
+
+    // 冰凍計時器
+    if (freezeTimer > 0) {
+      freezeTimer--;
+    }
+
+    // 特殊食物生成冷卻
+    if (powerUpSpawnCD > 0) {
+      powerUpSpawnCD--;
+    }
+
+    // Combo 計時器
+    if (comboTimer > 0) {
+      comboTimer--;
+      if (comboTimer <= 0) {
+        comboCount = 0;
+      }
+    }
+
+    // 速度里程碑檢查（每升 2 級顯示）
+    var currentLevel = getSpeedLevel();
+    if (currentLevel > 0 && currentLevel >= lastSpeedLevel + 2) {
+      lastSpeedLevel = currentLevel;
+      var speedPct = Math.round((1 - calculateSpeed() / baseSpeed) * 100);
+      milestoneDisplayText = 'LV.' + currentLevel + ' +' + speedPct + '%';
+      milestoneDisplayTimer = 90; // 顯示約 1.5 秒
+    }
+
     currentSpeed = calculateSpeed();
     updateScoreDisplay();
+  }
+
+  // === 道具收集效果 ===
+  function onCollectPowerUp(pu) {
+    var color = POWERUP_COLORS[pu.type];
+    spawnEatParticles(pu.x, pu.y, color);
+
+    switch (pu.type) {
+      case PowerUpType.FREEZE:
+        freezeTimer = 25; // ~3 秒減速
+        score += 2;
+        playFreezeSound();
+        break;
+
+      case PowerUpType.POISON:
+        score += 5;
+        playPoisonSound();
+        // 縮短蛇身 2 節（最少保留 2 節）
+        var removeCount = Math.min(2, snake.length - 2);
+        for (var i = 0; i < removeCount; i++) {
+          snake.pop();
+        }
+        break;
+
+      case PowerUpType.PORTAL:
+        score += 2;
+        playPortalSound();
+        // 蛇頭隨機傳送到空位
+        var newPos;
+        var attempts = 0;
+        do {
+          newPos = {
+            x: (Math.random() * COLS) | 0,
+            y: (Math.random() * ROWS) | 0
+          };
+          attempts++;
+        } while (
+          attempts < 100 &&
+          (snake.some(function (s) { return s.x === newPos.x && s.y === newPos.y; }) ||
+           (food && food.x === newPos.x && food.y === newPos.y))
+        );
+        snake[0].x = newPos.x;
+        snake[0].y = newPos.y;
+        spawnEatParticles(newPos.x, newPos.y, '#a855f7');
+        break;
+
+      case PowerUpType.SHIELD:
+        hasShield = true;
+        playShieldSound();
+        break;
+    }
   }
 
   // === 狀態轉換 ===
@@ -299,6 +606,8 @@
     gameState = State.PLAYING;
     lastTickTime = 0;
     accumulator = 0;
+    gameStartTime = Date.now();
+    gracePeriodTicks = 3; // 開場 3 tick 無敵（約 0.36 秒）
     playStartSound();
     updateScoreDisplay();
     if (pauseBtn) pauseBtn.textContent = '暫停';
@@ -309,10 +618,28 @@
     dir = { x: 0, y: 0 };
     food = spawnFood();
     goldenFood = null;
+    powerUpFood = null;
+    freezeTimer = 0;
+    hasShield = false;
+    powerUpSpawnCD = 0;
     score = 0;
     currentSpeed = baseSpeed;
     inputBuffer = [];
     shakeFrames = 0;
+    activeParticleCount = 0;
+    // Combo 重置
+    comboCount = 0;
+    comboTimer = 0;
+    maxCombo = 0;
+    comboDisplayTimer = 0;
+    // 速度里程碑重置
+    lastSpeedLevel = 0;
+    milestoneDisplayTimer = 0;
+    // 統計重置
+    totalFoodEaten = 0;
+    gameStartTime = 0;
+    // 蛇身顏色快取重置
+    snakeColorCacheLen = 0;
   }
 
   function togglePause() {
@@ -334,24 +661,42 @@
     shakeFrames = 20;
     playGameOverSound();
     var isNewRecord = saveHighScore();
-    var recordText = isNewRecord ? ' 🎉 新紀錄！' : '';
+    var recordText = isNewRecord ? ' \uD83C\uDF89 \u65B0\u7D00\u9304\uFF01' : '';
+
+    // 計算存活時間
+    var survivalSec = gameStartTime > 0 ? Math.round((Date.now() - gameStartTime) / 1000) : 0;
+    var survivalText = '';
+    if (survivalSec >= 60) {
+      survivalText = Math.floor(survivalSec / 60) + '\u5206' + (survivalSec % 60) + '\u79D2';
+    } else {
+      survivalText = survivalSec + '\u79D2';
+    }
+
     scoreEl.innerHTML =
-      '<span style="color:#ef4444; font-weight:bold;">遊戲結束！</span> ' +
-      '分數: ' + score + recordText + '<br>' +
-      '<small>最高分: ' + highScore + ' | 點擊或按方向鍵重新開始</small>';
+      '<span style="color:#ef4444; font-weight:bold;">\u904A\u6232\u7D50\u675F\uFF01</span> ' +
+      '\u5206\u6578: ' + score + recordText + '<br>' +
+      '<small style="color:#94a3b8;">' +
+      '\u5B58\u6D3B: ' + survivalText +
+      ' | \u98DF\u7269: ' + totalFoodEaten +
+      ' | \u6700\u9577\u9023\u64CA: ' + maxCombo + 'x' +
+      '</small><br>' +
+      '<small>\u6700\u9AD8\u5206: ' + highScore + ' | \u9EDE\u64CA\u6216\u6309\u65B9\u5411\u9375\u91CD\u65B0\u958B\u59CB</small>';
   }
 
   function updateScoreDisplay() {
     if (gameState === State.MENU) {
-      scoreEl.textContent = '按方向鍵或點擊畫面開始';
+      scoreEl.textContent = '\u6309\u65B9\u5411\u9375\u6216\u9EDE\u64CA\u756B\u9762\u958B\u59CB';
       return;
     }
     var speedPercent = Math.round((1 - currentSpeed / baseSpeed) * 100);
-    var speedText = speedPercent > 0 ? ' (+' + speedPercent + '% 速度)' : '';
-    var pauseText = gameState === State.PAUSED ? ' | <span style="color:#f59e0b;">已暫停</span>' : '';
+    var speedText = speedPercent > 0 ? ' (+' + speedPercent + '% \u901F\u5EA6)' : '';
+    if (freezeTimer > 0) speedText = ' <span style="color:#38bdf8;">(\u6E1B\u901F\u4E2D)</span>';
+    var effectText = hasShield ? ' <span style="color:#94a3b8;">\u2606</span>' : '';
+    var pauseText = gameState === State.PAUSED ? ' | <span style="color:#f59e0b;">\u5DF2\u66AB\u505C</span>' : '';
+    var comboText = comboCount >= 3 ? ' <span style="color:#fbbf24;">' + comboCount + 'x</span>' : '';
     scoreEl.innerHTML =
-      '分數: <strong>' + score + '</strong>' + speedText +
-      ' | 最高分: ' + highScore + pauseText;
+      '\u5206\u6578: <strong>' + score + '</strong>' + comboText + speedText + effectText +
+      ' | \u6700\u9AD8\u5206: ' + highScore + pauseText;
   }
 
   // === 繪製 ===
@@ -394,17 +739,27 @@
       ctx.font = 'bold 28px "Noto Sans TC", sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText('貪吃蛇', LOGICAL_WIDTH / 2, LOGICAL_HEIGHT / 2 - 30);
+      ctx.fillText('\u8CAA\u5403\u86C7', LOGICAL_WIDTH / 2, LOGICAL_HEIGHT / 2 - 30);
 
       ctx.fillStyle = '#94a3b8';
       ctx.font = '14px "Noto Sans TC", sans-serif';
-      ctx.fillText('按方向鍵 / 滑動 / 點擊按鈕開始', LOGICAL_WIDTH / 2, LOGICAL_HEIGHT / 2 + 10);
+      ctx.fillText('\u6309\u65B9\u5411\u9375 / \u6ED1\u52D5 / \u9EDE\u64CA\u958B\u59CB', LOGICAL_WIDTH / 2, LOGICAL_HEIGHT / 2 + 10);
 
       if (highScore > 0) {
         ctx.fillStyle = '#7c3aed';
         ctx.font = '13px "Noto Sans TC", sans-serif';
-        ctx.fillText('最高分: ' + highScore, LOGICAL_WIDTH / 2, LOGICAL_HEIGHT / 2 + 40);
+        ctx.fillText('\u6700\u9AD8\u5206: ' + highScore, LOGICAL_WIDTH / 2, LOGICAL_HEIGHT / 2 + 35);
       }
+
+      // 道具提示
+      ctx.fillStyle = '#64748b';
+      ctx.font = '11px "Noto Sans TC", sans-serif';
+      ctx.fillText('\u2744\u2620\u2731\u2606 \u7279\u6B8A\u98DF\u7269\u96A8\u6A5F\u51FA\u73FE', LOGICAL_WIDTH / 2, LOGICAL_HEIGHT / 2 + 58);
+
+      // 連擊提示
+      ctx.fillStyle = '#fbbf24';
+      ctx.font = '11px "Noto Sans TC", sans-serif';
+      ctx.fillText('\u9023\u7E8C\u5403\u98DF\u7269\u89F8\u767C Combo \u52A0\u5206\uFF01', LOGICAL_WIDTH / 2, LOGICAL_HEIGHT / 2 + 76);
 
       ctx.restore();
       frameCount++;
@@ -462,14 +817,74 @@
       }
     }
 
-    // 蛇身
+    // 特殊食物（道具）
+    if (powerUpFood) {
+      var puType = powerUpFood.type;
+      var puColor = POWERUP_COLORS[puType];
+      var puPulse = Math.sin(frameCount * 0.2) * 2 + 2;
+      var puX = powerUpFood.x * CELL + CELL / 2;
+      var puY = powerUpFood.y * CELL + CELL / 2;
+
+      // 光暈
+      ctx.globalAlpha = 0.25;
+      ctx.fillStyle = puColor;
+      ctx.beginPath();
+      ctx.arc(puX, puY, CELL * 0.9 + puPulse, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+
+      // 背景圓
+      ctx.fillStyle = puColor;
+      ctx.beginPath();
+      ctx.arc(puX, puY, (CELL / 2 - 2 + puPulse * 0.3) | 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // 符號
+      ctx.fillStyle = puType === 'shield' ? '#334155' : '#fff';
+      ctx.font = 'bold 13px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      if (puType === 'portal') {
+        // 傳送門旋轉效果
+        ctx.save();
+        ctx.translate(puX, puY);
+        ctx.rotate(frameCount * 0.08);
+        ctx.fillText('\u2731', 0, 0); // ✱
+        ctx.restore();
+      } else {
+        ctx.fillText(POWERUP_SYMBOLS[puType], puX, puY);
+      }
+
+      // 剩餘時間（快消失時顯示）
+      if (powerUpFood.ttl < 15) {
+        ctx.globalAlpha = 0.5 + Math.sin(frameCount * 0.3) * 0.3;
+        ctx.fillStyle = '#fff';
+        ctx.font = '9px sans-serif';
+        ctx.fillText(Math.ceil(powerUpFood.ttl / 8).toString(), puX, puY + 14);
+        ctx.globalAlpha = 1;
+      }
+    }
+
+    // 冰凍效果邊框
+    if (freezeTimer > 0) {
+      var freezeAlpha = Math.min(0.3, freezeTimer / 25 * 0.3);
+      ctx.strokeStyle = 'rgba(56, 189, 248, ' + freezeAlpha + ')';
+      ctx.lineWidth = 4;
+      ctx.strokeRect(2, 2, LOGICAL_WIDTH - 4, LOGICAL_HEIGHT - 4);
+    }
+
+    // 蛇身（使用顏色快取）
+    updateSnakeColorCache(snake.length);
     for (var i = 0; i < snake.length; i++) {
       var segment = snake[i];
-      var ratio = i / Math.max(snake.length - 1, 1);
 
       if (i === 0) {
-        // 蛇頭
-        ctx.fillStyle = '#7c3aed';
+        // 蛇頭（無敵期閃爍）
+        if (gracePeriodTicks > 0 && frameCount % 8 < 4) {
+          ctx.fillStyle = '#a78bfa'; // 亮紫色閃爍
+        } else {
+          ctx.fillStyle = '#7c3aed';
+        }
         drawRoundedRect(
           segment.x * CELL + 1,
           segment.y * CELL + 1,
@@ -504,12 +919,19 @@
         ctx.arc(eyeX1, eyeY1, 2, 0, Math.PI * 2);
         ctx.arc(eyeX2, eyeY2, 2, 0, Math.PI * 2);
         ctx.fill();
+
+        // 護盾光環
+        if (hasShield) {
+          var shieldAlpha = 0.3 + Math.sin(frameCount * 0.12) * 0.15;
+          ctx.strokeStyle = 'rgba(241, 245, 249, ' + shieldAlpha + ')';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(segment.x * CELL + CELL / 2, segment.y * CELL + CELL / 2, CELL * 0.7, 0, Math.PI * 2);
+          ctx.stroke();
+        }
       } else {
-        // 蛇身漸層
-        var r = (124 + ratio * 43 + 0.5) | 0;
-        var g = (58 + ratio * 81 + 0.5) | 0;
-        var b = (237 + ratio * 13 + 0.5) | 0;
-        ctx.fillStyle = 'rgb(' + r + ',' + g + ',' + b + ')';
+        // 蛇身漸層（使用快取的顏色）
+        ctx.fillStyle = snakeColorCache[i] || '#7c3aed';
         drawRoundedRect(
           segment.x * CELL + 1,
           segment.y * CELL + 1,
@@ -524,6 +946,57 @@
     updateParticles();
     drawParticles();
 
+    // 道具狀態 HUD（右上角）
+    if (gameState === State.PLAYING) {
+      var hudX = LOGICAL_WIDTH - 8;
+      var hudY = 14;
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'top';
+
+      if (freezeTimer > 0) {
+        var freezeSec = Math.ceil(freezeTimer * (currentSpeed / 1000));
+        ctx.fillStyle = '#38bdf8';
+        ctx.font = 'bold 12px sans-serif';
+        ctx.fillText('\u2744 ' + freezeSec + 's', hudX, hudY);
+        hudY += 16;
+      }
+
+      if (hasShield) {
+        ctx.fillStyle = '#f1f5f9';
+        ctx.font = 'bold 12px sans-serif';
+        ctx.fillText('\u2606 \u8B77\u76FE', hudX, hudY);
+        hudY += 16;
+      }
+    }
+
+    // Combo 提示文字（Canvas 中央偏上，浮動漸隱）
+    if (comboDisplayTimer > 0) {
+      var comboAlpha = Math.min(1, comboDisplayTimer / 30);
+      var comboOffsetY = (60 - comboDisplayTimer) * 0.5; // 緩慢上浮
+      ctx.globalAlpha = comboAlpha;
+      ctx.fillStyle = '#fbbf24';
+      ctx.font = 'bold 18px "Noto Sans TC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(comboDisplayText, LOGICAL_WIDTH / 2, 50 - comboOffsetY);
+      ctx.globalAlpha = 1;
+      comboDisplayTimer--;
+    }
+
+    // 速度里程碑提示文字（Canvas 中央偏下）
+    if (milestoneDisplayTimer > 0) {
+      var msAlpha = Math.min(1, milestoneDisplayTimer / 40);
+      var msOffsetY = (90 - milestoneDisplayTimer) * 0.3;
+      ctx.globalAlpha = msAlpha;
+      ctx.fillStyle = '#a78bfa';
+      ctx.font = 'bold 16px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('\u2191 ' + milestoneDisplayText, LOGICAL_WIDTH / 2, LOGICAL_HEIGHT - 40 - msOffsetY);
+      ctx.globalAlpha = 1;
+      milestoneDisplayTimer--;
+    }
+
     // 暫停覆蓋層
     if (gameState === State.PAUSED) {
       ctx.fillStyle = 'rgba(15, 23, 42, 0.7)';
@@ -533,11 +1006,11 @@
       ctx.font = 'bold 24px "Noto Sans TC", sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText('已暫停', LOGICAL_WIDTH / 2, LOGICAL_HEIGHT / 2 - 10);
+      ctx.fillText('\u5DF2\u66AB\u505C', LOGICAL_WIDTH / 2, LOGICAL_HEIGHT / 2 - 10);
 
       ctx.fillStyle = '#94a3b8';
       ctx.font = '13px "Noto Sans TC", sans-serif';
-      ctx.fillText('按 Esc / 空白鍵 繼續', LOGICAL_WIDTH / 2, LOGICAL_HEIGHT / 2 + 20);
+      ctx.fillText('\u6309 Esc / \u7A7A\u767D\u9375 \u7E7C\u7E8C', LOGICAL_WIDTH / 2, LOGICAL_HEIGHT / 2 + 20);
     }
 
     ctx.restore();
@@ -640,6 +1113,14 @@
     queueDirection(newDir);
   });
 
+  // === Canvas 滑鼠點擊（桌面用戶支援）===
+  canvas.addEventListener('click', function (e) {
+    initAudio();
+    if (gameState === State.MENU || gameState === State.GAMEOVER) {
+      queueDirection({ x: 1, y: 0 }); // 預設向右開始
+    }
+  });
+
   // === 觸控按鈕控制 ===
   var touchDirMap = {
     up:    { x:  0, y: -1 },
@@ -730,12 +1211,12 @@
     // 觸控裝置不顯示鍵盤提示
     var isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
     if (isTouchDevice) {
-      el.innerHTML = '滑動或點擊按鈕控制方向';
+      el.innerHTML = '\u6ED1\u52D5\u6216\u9EDE\u64CA\u6309\u9215\u63A7\u5236\u65B9\u5411';
     } else {
       el.innerHTML =
-        '<kbd>&uarr;</kbd><kbd>&darr;</kbd><kbd>&larr;</kbd><kbd>&rarr;</kbd> 或 ' +
-        '<kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> 移動 | ' +
-        '<kbd>Esc</kbd> / <kbd>空白鍵</kbd> 暫停';
+        '<kbd>&uarr;</kbd><kbd>&darr;</kbd><kbd>&larr;</kbd><kbd>&rarr;</kbd> \u6216 ' +
+        '<kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> \u79FB\u52D5 | ' +
+        '<kbd>Esc</kbd> / <kbd>\u7A7A\u767D\u9375</kbd> \u66AB\u505C';
     }
   }
 

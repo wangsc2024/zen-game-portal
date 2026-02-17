@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Space Invaders - 小蜜蜂</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #000;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      overflow: hidden;
+      font-family: 'Courier New', monospace;
+      touch-action: none;
+    }
+    #gameContainer {
+      position: relative;
+      width: 100%;
+      max-width: 480px;
+    }
+    canvas {
+      display: block;
+      width: 100%;
+      height: auto;
+      image-rendering: pixelated;
+    }
+    #touchControls {
+      display: none;
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 120px;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0 20px;
+      z-index: 10;
+    }
+    .touch-btn {
+      width: 70px;
+      height: 70px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.15);
+      border: 2px solid rgba(255, 255, 255, 0.3);
+      color: #fff;
+      font-size: 28px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    .touch-btn:active {
+      background: rgba(255, 255, 255, 0.35);
+    }
+    .touch-group {
+      display: flex;
+      gap: 15px;
+    }
+    @media (pointer: coarse) {
+      #touchControls { display: flex; }
+    }
+  </style>
+</head>
+<body>
+  <div id="gameContainer">
+    <canvas id="gameCanvas" width="480" height="640"></canvas>
+  </div>
+  <div id="touchControls">
+    <div class="touch-group">
+      <div class="touch-btn" id="btnLeft">&#9664;</div>
+      <div class="touch-btn" id="btnRight">&#9654;</div>
+    </div>
+    <div class="touch-btn" id="btnFire">&#9679;</div>
+  </div>
+  <script src="js/game.js"></script>
+</body>
+</html>
