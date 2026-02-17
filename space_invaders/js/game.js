@@ -1,7 +1,8 @@
 // ============================================================
-// Space Invaders (小蜜蜂) v1.0
+// Space Invaders (小蜜蜂) v2.0
 // 純 HTML5 Canvas + Web Audio API
 // 創意改良：粒子系統爆炸 + 8-bit 音效合成
+// v2.0: 觸控暫停、關卡過渡、碰撞優化、星空深度、射擊回饋
 // ============================================================
 
 (function () {
@@ -47,6 +48,12 @@
     playTone(100, 0.4, 'triangle', 0.1);
   }
   function sfxInvaderMove() { playTone(60, 0.05, 'square', 0.03); }
+  function sfxLevelClear() {
+    playTone(523, 0.15, 'square', 0.08);
+    setTimeout(() => playTone(659, 0.15, 'square', 0.08), 150);
+    setTimeout(() => playTone(784, 0.2, 'square', 0.1), 300);
+    setTimeout(() => playTone(1047, 0.3, 'square', 0.12), 450);
+  }
 
   // --- Particle Pool ---
   const MAX_PARTICLES = 200;
@@ -122,16 +129,17 @@
   }
 
   // --- Game State ---
-  const STATE = { LOADING: 0, MENU: 1, PLAYING: 2, PAUSED: 3, GAME_OVER: 4, LEVEL_CLEAR: 5 };
+  const STATE = { LOADING: 0, MENU: 1, PLAYING: 2, PAUSED: 3, GAME_OVER: 4, LEVEL_CLEAR: 5, READY: 6 };
   let state = STATE.LOADING;
   let score = 0;
   let highScore = parseInt(localStorage.getItem('si_highscore') || '0', 10);
   let lives = 3;
   let level = 1;
   let screenShake = 0;
+  let readyTimer = 0; // countdown for READY state (in seconds)
 
   // --- Player ---
-  const player = { x: W / 2, y: H - 60, w: 36, h: 24, speed: 220, cooldown: 0, invincible: 0 };
+  const player = { x: W / 2, y: H - 60, w: 36, h: 24, speed: 220, cooldown: 0, cooldownMax: 0.35, invincible: 0 };
 
   // --- Invaders ---
   const COLS = 11;
@@ -173,7 +181,7 @@
           w: INV_W,
           h: INV_H,
           type: INV_TYPES[r],
-          frame: 0, // animation frame 0 or 1
+          frame: 0,
         });
       }
     }
@@ -189,7 +197,6 @@
   const SHIELD_H = 32;
   const SHIELD_PIXEL = 4;
   let shields = [];
-  // Shield bitmap (11x8 pixels, 1=solid)
   const SHIELD_BITMAP = [
     [0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0],
     [0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0],
@@ -220,6 +227,30 @@
   // --- Mystery Ship (UFO) ---
   const ufo = { active: false, x: 0, y: 40, w: 36, h: 16, speed: 80, dir: 1, timer: 0, interval: 15 + Math.random() * 10 };
 
+  // --- Starfield (multi-layer for depth) ---
+  const STAR_LAYERS = [
+    { count: 40, speedFactor: 0.3, sizeMin: 0.5, sizeMax: 1, brightnessMin: 40, brightnessMax: 80 },
+    { count: 25, speedFactor: 0.7, sizeMin: 1, sizeMax: 1.5, brightnessMin: 80, brightnessMax: 140 },
+    { count: 15, speedFactor: 1.2, sizeMin: 1.5, sizeMax: 2.5, brightnessMin: 140, brightnessMax: 220 },
+  ];
+  const stars = [];
+  function initStars() {
+    for (const layer of STAR_LAYERS) {
+      for (let i = 0; i < layer.count; i++) {
+        stars.push({
+          x: Math.random() * W,
+          y: Math.random() * H,
+          speedFactor: layer.speedFactor,
+          size: layer.sizeMin + Math.random() * (layer.sizeMax - layer.sizeMin),
+          brightness: layer.brightnessMin + Math.random() * (layer.brightnessMax - layer.brightnessMin),
+          twinkleSpeed: 0.5 + Math.random() * 2,
+          twinkleOffset: Math.random() * Math.PI * 2,
+        });
+      }
+    }
+  }
+  initStars();
+
   // --- Input ---
   const keys = {};
   let touchLeft = false;
@@ -229,9 +260,13 @@
   window.addEventListener('keydown', (e) => {
     keys[e.key] = true;
     if (e.key === 'Escape') togglePause();
-    if ((e.key === ' ' || e.key === 'Enter') && (state === STATE.MENU || state === STATE.GAME_OVER || state === STATE.LEVEL_CLEAR)) {
+    if ((e.key === ' ' || e.key === 'Enter') && (state === STATE.MENU || state === STATE.GAME_OVER)) {
       ensureAudio();
-      startGame();
+      startNewGame();
+    }
+    if ((e.key === ' ' || e.key === 'Enter') && state === STATE.LEVEL_CLEAR) {
+      ensureAudio();
+      startNextLevel();
     }
   });
   window.addEventListener('keyup', (e) => { keys[e.key] = false; });
@@ -248,12 +283,27 @@
   setupTouch('btnRight', () => { touchRight = true; }, () => { touchRight = false; });
   setupTouch('btnFire', () => { touchFire = true; }, () => { touchFire = false; });
 
+  // Touch pause button
+  const btnPause = document.getElementById('btnPause');
+  if (btnPause) {
+    btnPause.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      togglePause();
+    });
+    btnPause.addEventListener('click', (e) => {
+      e.preventDefault();
+      togglePause();
+    });
+  }
+
   // Tap canvas to start / fire
   canvas.addEventListener('touchstart', (e) => {
     e.preventDefault();
     ensureAudio();
-    if (state === STATE.MENU || state === STATE.GAME_OVER || state === STATE.LEVEL_CLEAR) {
-      startGame();
+    if (state === STATE.MENU || state === STATE.GAME_OVER) {
+      startNewGame();
+    } else if (state === STATE.LEVEL_CLEAR) {
+      startNextLevel();
     } else if (state === STATE.PAUSED) {
       state = STATE.PLAYING;
     }
@@ -261,20 +311,27 @@
 
   canvas.addEventListener('click', () => {
     ensureAudio();
-    if (state === STATE.MENU || state === STATE.GAME_OVER || state === STATE.LEVEL_CLEAR) {
-      startGame();
+    if (state === STATE.MENU || state === STATE.GAME_OVER) {
+      startNewGame();
+    } else if (state === STATE.LEVEL_CLEAR) {
+      startNextLevel();
     }
   });
 
   // --- Init / Start ---
-  function startGame() {
-    if (state === STATE.GAME_OVER || state === STATE.MENU) {
-      score = 0;
-      lives = 3;
-      level = 1;
-    } else if (state === STATE.LEVEL_CLEAR) {
-      level++;
-    }
+  function startNewGame() {
+    score = 0;
+    lives = 3;
+    level = 1;
+    prepareLevel();
+  }
+
+  function startNextLevel() {
+    level++;
+    prepareLevel();
+  }
+
+  function prepareLevel() {
     player.x = W / 2;
     player.cooldown = 0;
     player.invincible = 0;
@@ -284,7 +341,8 @@
     ufo.timer = 0;
     for (const b of bullets) b.active = false;
     for (const p of particlePool) p.active = false;
-    state = STATE.PLAYING;
+    readyTimer = 1.8; // 1.8 second countdown
+    state = STATE.READY;
   }
 
   function togglePause() {
@@ -299,6 +357,16 @@
 
   // --- Update ---
   function update(dt) {
+    // Handle READY countdown
+    if (state === STATE.READY) {
+      readyTimer -= dt;
+      if (readyTimer <= 0) {
+        state = STATE.PLAYING;
+      }
+      updateParticles(dt);
+      return;
+    }
+
     if (state !== STATE.PLAYING) return;
 
     // Screen shake decay
@@ -317,7 +385,7 @@
     if ((keys[' '] || keys['ArrowUp'] || touchFire) && player.cooldown <= 0) {
       if (fireBullet(player.x, player.y - player.h / 2, -400, 'player')) {
         sfxShoot();
-        player.cooldown = 0.35;
+        player.cooldown = player.cooldownMax;
       }
     }
 
@@ -331,7 +399,6 @@
       let hitEdge = false;
       const step = 10 * invDir;
 
-      // Check if any alive invader would go past edge
       for (const inv of invaders) {
         if (!inv.alive) continue;
         const nx = inv.x + step;
@@ -352,14 +419,12 @@
         }
       }
 
-      // Toggle animation frame
       for (const inv of invaders) {
         if (inv.alive) inv.frame = 1 - inv.frame;
       }
 
       sfxInvaderMove();
 
-      // Speed up as fewer invaders remain
       const aliveCount = invaders.filter(i => i.alive).length;
       if (aliveCount > 0) {
         const ratio = aliveCount / (ROWS * COLS);
@@ -371,7 +436,6 @@
     invShootTimer += dt;
     if (invShootTimer >= invShootInterval) {
       invShootTimer = 0;
-      // Pick a random alive invader from the bottom of each column
       const bottomInvaders = [];
       for (let c = 0; c < COLS; c++) {
         for (let r = ROWS - 1; r >= 0; r--) {
@@ -420,7 +484,6 @@
             b.active = false;
             score += inv.type.points;
             sfxExplosion();
-            // Parse color for particles
             const clr = inv.type.color;
             const pr = parseInt(clr.slice(1, 3), 16);
             const pg = parseInt(clr.slice(3, 5), 16);
@@ -445,9 +508,9 @@
         }
       }
 
-      // Enemy bullets vs player
+      // Enemy bullets vs player (enlarged collision area for fairness: 6x8)
       if (b.owner === 'enemy' && player.invincible <= 0) {
-        if (aabb(b.x - 2, b.y - 2, 4, 4, player.x - player.w / 2, player.y - player.h / 2, player.w, player.h)) {
+        if (aabb(b.x - 3, b.y - 4, 6, 8, player.x - player.w / 2, player.y - player.h / 2, player.w, player.h)) {
           b.active = false;
           playerHit();
         }
@@ -475,7 +538,6 @@
         saveHighScore();
         return;
       }
-      // Invaders destroy shield pixels on contact
       for (const shield of shields) {
         for (const px of shield) {
           if (!px.alive) continue;
@@ -489,6 +551,7 @@
     // Check level clear
     if (invaders.every(i => !i.alive)) {
       state = STATE.LEVEL_CLEAR;
+      sfxLevelClear();
       saveHighScore();
     }
 
@@ -520,9 +583,7 @@
     const cx = inv.x + inv.w / 2;
     const cy = inv.y + inv.h / 2;
     ctx.fillStyle = inv.type.color;
-    // Simple pixel art invader shapes
     if (inv.row === 0) {
-      // Top type (small, squid-like)
       ctx.fillRect(cx - 4, cy - 6, 8, 4);
       ctx.fillRect(cx - 8, cy - 2, 16, 4);
       ctx.fillRect(cx - 10, cy + 2, 4, 4);
@@ -535,7 +596,6 @@
         ctx.fillRect(cx + 8, cy - 2, 4, 4);
       }
     } else if (inv.row <= 2) {
-      // Mid type (crab-like)
       ctx.fillRect(cx - 6, cy - 6, 12, 4);
       ctx.fillRect(cx - 10, cy - 2, 20, 4);
       ctx.fillRect(cx - 12, cy + 2, 24, 4);
@@ -549,7 +609,6 @@
         ctx.fillRect(cx + 10, cy + 2, 4, 4);
       }
     } else {
-      // Bottom type (octopus-like)
       ctx.fillRect(cx - 8, cy - 6, 16, 4);
       ctx.fillRect(cx - 12, cy - 2, 24, 4);
       ctx.fillRect(cx - 14, cy + 2, 28, 4);
@@ -567,19 +626,24 @@
   }
 
   function drawPlayer() {
-    if (player.invincible > 0 && Math.floor(player.invincible * 10) % 2 === 0) return; // blink
+    if (player.invincible > 0 && Math.floor(player.invincible * 10) % 2 === 0) return;
     const px = player.x;
     const py = player.y;
     ctx.fillStyle = '#00ffcc';
-    // Ship body
     ctx.fillRect(px - 2, py - 12, 4, 4);
     ctx.fillRect(px - 6, py - 8, 12, 4);
     ctx.fillRect(px - 14, py - 4, 28, 4);
     ctx.fillRect(px - 18, py, 36, 6);
-    // Engine glow
     ctx.fillStyle = '#00aa88';
     ctx.fillRect(px - 8, py + 6, 4, 3);
     ctx.fillRect(px + 4, py + 6, 4, 3);
+
+    // Cooldown indicator (small bar under player)
+    if (player.cooldown > 0) {
+      const pct = player.cooldown / player.cooldownMax;
+      ctx.fillStyle = `rgba(0,255,204,${0.3 + pct * 0.4})`;
+      ctx.fillRect(px - 12, py + 12, 24 * (1 - pct), 2);
+    }
   }
 
   function drawUFO() {
@@ -612,8 +676,8 @@
       if (b.owner === 'player') {
         ctx.fillRect(b.x - 1, b.y - 6, 2, 12);
       } else {
-        // Zigzag enemy bullet
-        ctx.fillRect(b.x - 2, b.y - 3, 4, 6);
+        // Zigzag enemy bullet (wider for visibility)
+        ctx.fillRect(b.x - 2, b.y - 4, 4, 8);
       }
     }
   }
@@ -622,11 +686,11 @@
     ctx.fillStyle = '#ffffff';
     ctx.font = '16px "Courier New", monospace';
     ctx.textAlign = 'left';
-    ctx.fillText(`SCORE: ${score}`, 10, 24);
+    ctx.fillText('SCORE: ' + score, 10, 24);
     ctx.textAlign = 'center';
-    ctx.fillText(`LEVEL ${level}`, W / 2, 24);
+    ctx.fillText('LEVEL ' + level, W / 2, 24);
     ctx.textAlign = 'right';
-    ctx.fillText(`HI: ${highScore}`, W - 10, 24);
+    ctx.fillText('HI: ' + highScore, W - 10, 24);
 
     // Lives
     ctx.textAlign = 'left';
@@ -665,14 +729,50 @@
   }
 
   function drawStarfield(time) {
-    // Simple animated starfield background
-    ctx.fillStyle = '#111';
-    for (let i = 0; i < 60; i++) {
-      const sx = (i * 73 + time * 5 * ((i % 3) + 1)) % W;
-      const sy = (i * 137 + time * 8 * ((i % 2) + 1)) % H;
-      const brightness = 80 + (i % 3) * 40;
-      ctx.fillStyle = `rgb(${brightness},${brightness},${brightness})`;
-      ctx.fillRect(sx, sy, 1, 1);
+    for (const star of stars) {
+      // Scroll stars downward slowly for parallax
+      star.y += star.speedFactor * 0.15;
+      if (star.y > H) {
+        star.y = -2;
+        star.x = Math.random() * W;
+      }
+
+      // Twinkle effect
+      const twinkle = 0.6 + 0.4 * Math.sin(time * star.twinkleSpeed + star.twinkleOffset);
+      const b = Math.floor(star.brightness * twinkle);
+      ctx.fillStyle = `rgb(${b},${b},${Math.min(255, b + 20)})`;
+      ctx.fillRect(star.x, star.y, star.size, star.size);
+    }
+  }
+
+  function drawReadyScreen(time) {
+    // Draw the game scene underneath (invaders, shields, player)
+    for (const inv of invaders) { if (inv.alive) drawInvader(inv); }
+    drawShields();
+    drawPlayer();
+    drawHUD();
+
+    // Dim overlay
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Level text
+    ctx.fillStyle = '#00ffcc';
+    ctx.font = 'bold 36px "Courier New", monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('LEVEL ' + level, W / 2, H / 2 - 30);
+
+    // Countdown or READY text
+    if (readyTimer > 1.0) {
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 28px "Courier New", monospace';
+      ctx.fillText('READY', W / 2, H / 2 + 20);
+    } else {
+      // Pulsing "GO!" in the last second
+      const pulse = 0.5 + 0.5 * Math.sin(time * 12);
+      ctx.fillStyle = `rgba(0,255,204,${pulse})`;
+      ctx.font = 'bold 40px "Courier New", monospace';
+      ctx.fillText('GO!', W / 2, H / 2 + 25);
     }
   }
 
@@ -692,8 +792,16 @@
 
     drawStarfield(time);
 
+    if (state === STATE.LOADING) {
+      drawLoadingScreen();
+      ctx.restore();
+      return;
+    }
+
     if (state === STATE.MENU) {
-      drawScreen('SPACE INVADERS', '\u6309 Enter / \u9EDE\u64CA\u958B\u59CB', '\u2190 \u2192 \u79FB\u52D5 \u00B7 \u7A7A\u683C \u5C04\u64CA \u00B7 Esc \u66AB\u505C');
+      drawScreen('SPACE INVADERS', '按 Enter / 點擊開始', '← → 移動 · 空格 射擊 · Esc 暫停');
+    } else if (state === STATE.READY) {
+      drawReadyScreen(time);
     } else if (state === STATE.PLAYING || state === STATE.PAUSED) {
       for (const inv of invaders) { if (inv.alive) drawInvader(inv); }
       drawUFO();
@@ -703,18 +811,18 @@
       drawParticles();
       drawHUD();
       if (state === STATE.PAUSED) {
-        drawScreen('PAUSED', '\u6309 Esc \u7E7C\u7E8C');
+        drawScreen('暫停', '按 Esc 繼續');
       }
     } else if (state === STATE.GAME_OVER) {
       for (const inv of invaders) { if (inv.alive) drawInvader(inv); }
       drawShields();
       drawParticles();
       drawHUD();
-      drawScreen('GAME OVER', `\u5F97\u5206: ${score}`, '\u6309 Enter / \u9EDE\u64CA\u91CD\u65B0\u958B\u59CB');
+      drawScreen('GAME OVER', '得分: ' + score, '按 Enter / 點擊重新開始');
     } else if (state === STATE.LEVEL_CLEAR) {
       drawHUD();
       drawParticles();
-      drawScreen(`LEVEL ${level} CLEAR!`, `\u5F97\u5206: ${score}`, '\u6309 Enter / \u9EDE\u64CA\u7E7C\u7E8C');
+      drawScreen('LEVEL ' + level + ' CLEAR!', '得分: ' + score, '按 Enter / 點擊繼續');
     }
 
     ctx.restore();
@@ -723,13 +831,25 @@
   // --- Game Loop ---
   let lastTime = 0;
   function gameLoop(timestamp) {
-    const dt = Math.min((timestamp - lastTime) / 1000, 0.05); // cap at 50ms
+    const dt = Math.min((timestamp - lastTime) / 1000, 0.05);
     lastTime = timestamp;
 
     update(dt);
     draw(timestamp / 1000);
 
     requestAnimationFrame(gameLoop);
+  }
+
+  // --- Loading screen (brief flash before menu) ---
+  function drawLoadingScreen() {
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, H);
+    drawStarfield(performance.now() / 1000);
+    ctx.fillStyle = '#00ffcc';
+    ctx.font = '18px "Courier New", monospace';
+    ctx.textAlign = 'center';
+    const dots = '.'.repeat(Math.floor((performance.now() / 400) % 4));
+    ctx.fillText('LOADING' + dots, W / 2, H / 2);
   }
 
   // --- Start ---

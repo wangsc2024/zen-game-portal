@@ -9,13 +9,34 @@
  * 5. [P1] 合併重複的輸入處理邏輯（handleInput + compositionend）
  * 6. [P2] 新增 Escape 鍵支援（返回開始畫面）
  * 7. [P2] 改善 clipboard API 使用順序（優先用新 API）
+ *
+ * v2.0 品質深度優化（2026-02-18）：
+ * 8. [P0] 手機觸控支援：虛擬鍵盤引導、auto-focus、inputmode 屬性
+ * 9. [P0] 明確狀態機（START → PLAYING → PAUSED → RESULT）
+ * 10. [P1] 響應式佈局：手機版頂部統計列取代桌面固定定位
+ * 11. [P1] ES5 var 全面升級為 const/let
+ * 12. [P1] 手機端 Combo/WPM/Timer 整合到 mobile-game-header
+ * 13. [P2] 輸入框加入 autocorrect/autocapitalize/spellcheck 抑制
  */
 
 ;(function () {
   'use strict';
 
+  // ===== 狀態機 =====
+  const GAME_STATE = {
+    START: 'start',
+    PLAYING: 'playing',
+    PAUSED: 'paused',
+    RESULT: 'result'
+  };
+
+  let currentGameState = GAME_STATE.START;
+
+  // ===== 裝置偵測 =====
+  const isTouchDevice = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+
   // ===== 持久化存儲管理 =====
-  var STORAGE_KEY = 'sixRootsZen_progress';
+  const STORAGE_KEY = 'sixRootsZen_progress';
 
   function getDefaultProgress() {
     return {
@@ -33,11 +54,11 @@
 
   function loadProgress() {
     try {
-      var data = localStorage.getItem(STORAGE_KEY);
+      const data = localStorage.getItem(STORAGE_KEY);
       if (data) {
-        var parsed = JSON.parse(data);
-        var defaults = getDefaultProgress();
-        for (var key in defaults) {
+        const parsed = JSON.parse(data);
+        const defaults = getDefaultProgress();
+        for (const key in defaults) {
           if (!(key in parsed)) parsed[key] = defaults[key];
         }
         return parsed;
@@ -48,9 +69,9 @@
     return getDefaultProgress();
   }
 
-  function saveProgress(progress) {
+  function saveProgress(prog) {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(progress));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(prog));
     } catch (e) {
       console.warn('儲存進度失敗:', e);
     }
@@ -60,29 +81,29 @@
     return new Date().toISOString().slice(0, 10);
   }
 
-  function updateConsecutiveDays(progress) {
-    var today = getTodayStr();
-    if (progress.lastPlayDate === today) return progress;
+  function updateConsecutiveDays(prog) {
+    const today = getTodayStr();
+    if (prog.lastPlayDate === today) return prog;
 
-    var yesterday = new Date();
+    const yesterday = new Date();
     yesterday.setDate(yesterday.getDate() - 1);
-    var yesterdayStr = yesterday.toISOString().slice(0, 10);
+    const yesterdayStr = yesterday.toISOString().slice(0, 10);
 
-    if (progress.lastPlayDate === yesterdayStr) {
-      progress.consecutiveDays++;
-    } else if (progress.lastPlayDate !== today) {
-      progress.consecutiveDays = 1;
+    if (prog.lastPlayDate === yesterdayStr) {
+      prog.consecutiveDays++;
+    } else if (prog.lastPlayDate !== today) {
+      prog.consecutiveDays = 1;
     }
 
-    progress.lastPlayDate = today;
-    progress.dailyFirstPlay = true;
-    return progress;
+    prog.lastPlayDate = today;
+    prog.dailyFirstPlay = true;
+    return prog;
   }
 
-  var savedProgress = loadProgress();
+  let savedProgress = loadProgress();
 
   // ===== 禪語資料 =====
-  var zenTexts = {
+  const zenTexts = {
     eye: [
       { text: '見山是山', meaning: '初見本相' },
       { text: '觀自在菩薩', meaning: '觀照自性' },
@@ -153,7 +174,7 @@
     ]
   };
 
-  var deepZenTexts = {
+  const deepZenTexts = {
     eye: [
       { text: '見山是山見水是水', meaning: '初見萬物本相' },
       { text: '青青翠竹盡是法身', meaning: '萬物皆現佛性' },
@@ -193,29 +214,29 @@
     ]
   };
 
-  var rootNames = {
+  const rootNames = {
     eye: '眼', ear: '耳', nose: '鼻',
     tongue: '舌', body: '身', mind: '意'
   };
 
-  var rootOrder = ['eye', 'ear', 'nose', 'tongue', 'body', 'mind'];
+  const rootOrder = ['eye', 'ear', 'nose', 'tongue', 'body', 'mind'];
 
   // ===== 成就定義 =====
-  var achievements = [
-    { id: 'first_purify', name: '初心', icon: '🌱', desc: '完成首次淨化', condition: function (s) { return s.purifyCount === 1; } },
-    { id: 'combo_10', name: '專注', icon: '🎯', desc: '達成 10 連擊', condition: function (s) { return s.currentStreak === 10; } },
-    { id: 'combo_25', name: '入定', icon: '🧘', desc: '達成 25 連擊', condition: function (s) { return s.currentStreak === 25; } },
-    { id: 'combo_50', name: '禪定', icon: '✨', desc: '達成 50 連擊', condition: function (s) { return s.currentStreak === 50; } },
-    { id: 'combo_100', name: '三昧', icon: '🪷', desc: '達成 100 連擊', condition: function (s) { return s.currentStreak === 100; } },
-    { id: 'full_focus', name: '定力圓滿', icon: '🔥', desc: '定力達到 100%', condition: function (s) { return s.focus === 100; } },
-    { id: 'round_1', name: '六根清淨', icon: '☯️', desc: '完成一輪淨化', condition: function (s) { return s.purifyCount === 6 && s.roundCount === 1; } },
-    { id: 'round_3', name: '修行精進', icon: '🏆', desc: '完成三輪淨化', condition: function (s) { return s.roundCount === 4; } },
-    { id: 'round_5', name: '悟道', icon: '🌟', desc: '完成五輪淨化', condition: function (s) { return s.roundCount === 6; } },
-    { id: 'accuracy_100', name: '無瑕', icon: '💎', desc: '準確率保持 100%（至少 20 字）', condition: function (s) { return s.totalChars >= 20 && s.correctChars === s.totalChars; } }
+  const achievements = [
+    { id: 'first_purify', name: '初心', icon: '🌱', desc: '完成首次淨化', condition: (s) => s.purifyCount === 1 },
+    { id: 'combo_10', name: '專注', icon: '🎯', desc: '達成 10 連擊', condition: (s) => s.currentStreak === 10 },
+    { id: 'combo_25', name: '入定', icon: '🧘', desc: '達成 25 連擊', condition: (s) => s.currentStreak === 25 },
+    { id: 'combo_50', name: '禪定', icon: '✨', desc: '達成 50 連擊', condition: (s) => s.currentStreak === 50 },
+    { id: 'combo_100', name: '三昧', icon: '🪷', desc: '達成 100 連擊', condition: (s) => s.currentStreak === 100 },
+    { id: 'full_focus', name: '定力圓滿', icon: '🔥', desc: '定力達到 100%', condition: (s) => s.focus === 100 },
+    { id: 'round_1', name: '六根清淨', icon: '☯️', desc: '完成一輪淨化', condition: (s) => s.purifyCount === 6 && s.roundCount === 1 },
+    { id: 'round_3', name: '修行精進', icon: '🏆', desc: '完成三輪淨化', condition: (s) => s.roundCount === 4 },
+    { id: 'round_5', name: '悟道', icon: '🌟', desc: '完成五輪淨化', condition: (s) => s.roundCount === 6 },
+    { id: 'accuracy_100', name: '無瑕', icon: '💎', desc: '準確率保持 100%（至少 20 字）', condition: (s) => s.totalChars >= 20 && s.correctChars === s.totalChars }
   ];
 
   // ===== 修行等級 =====
-  var cultivationLevels = [
+  const cultivationLevels = [
     { name: '初學', threshold: 0, icon: '🌱' },
     { name: '入門', threshold: 10, icon: '📿' },
     { name: '精進', threshold: 30, icon: '🎋' },
@@ -227,8 +248,8 @@
   ];
 
   function getCultivationLevel(totalPurify) {
-    var level = cultivationLevels[0];
-    for (var i = 0; i < cultivationLevels.length; i++) {
+    let level = cultivationLevels[0];
+    for (let i = 0; i < cultivationLevels.length; i++) {
       if (totalPurify >= cultivationLevels[i].threshold) {
         level = cultivationLevels[i];
       } else {
@@ -239,24 +260,24 @@
   }
 
   function getLevelProgress(totalPurify) {
-    var currentLevel = getCultivationLevel(totalPurify);
-    var currentIndex = cultivationLevels.indexOf(currentLevel);
+    const currentLevel = getCultivationLevel(totalPurify);
+    const currentIndex = cultivationLevels.indexOf(currentLevel);
     if (currentIndex >= cultivationLevels.length - 1) return 100;
-    var nextLevel = cultivationLevels[currentIndex + 1];
-    var progress = ((totalPurify - currentLevel.threshold) / (nextLevel.threshold - currentLevel.threshold)) * 100;
+    const nextLevel = cultivationLevels[currentIndex + 1];
+    const progress = ((totalPurify - currentLevel.threshold) / (nextLevel.threshold - currentLevel.threshold)) * 100;
     return Math.min(100, Math.max(0, Math.round(progress)));
   }
 
   function getNextLevelInfo(totalPurify) {
-    var currentLevel = getCultivationLevel(totalPurify);
-    var currentIndex = cultivationLevels.indexOf(currentLevel);
+    const currentLevel = getCultivationLevel(totalPurify);
+    const currentIndex = cultivationLevels.indexOf(currentLevel);
     if (currentIndex >= cultivationLevels.length - 1) return null;
-    var nextLevel = cultivationLevels[currentIndex + 1];
+    const nextLevel = cultivationLevels[currentIndex + 1];
     return { name: nextLevel.name, icon: nextLevel.icon, needed: nextLevel.threshold - totalPurify };
   }
 
   // ===== 遊戲狀態 =====
-  var gameState = {
+  let gameState = {
     currentRoot: null,
     currentZen: null,
     inputIndex: 0,
@@ -278,33 +299,32 @@
     rootErrorCount: 0
   };
 
-  var currentMode = 'standard';
-  var lightningTimer = null;
-  var lightningTimeLeft = 0;
-  var isPaused = false;
+  let currentMode = 'standard';
+  let lightningTimeLeft = 0;
+  let isPaused = false;
 
-  var modeConfig = {
+  const modeConfig = {
     standard: { name: '標準模式', timePerChar: null, useDeepZen: false },
     lightning: { name: '閃電模式', timePerChar: 2.5, useDeepZen: false },
     deep: { name: '深禪模式', timePerChar: null, useDeepZen: true }
   };
 
-  var milestones = [
+  const milestones = [
     { streak: 10, text: '🎯 專注！10 連擊！' },
     { streak: 25, text: '🧘 入定！25 連擊！' },
     { streak: 50, text: '✨ 禪定！50 連擊！' },
     { streak: 75, text: '🌟 深定！75 連擊！' },
     { streak: 100, text: '🪷 三昧！100 連擊！' }
   ];
-  var reachedMilestones = new Set();
+  let reachedMilestones = new Set();
 
   // ===== 音效系統 (Web Audio API) =====
-  var AudioCtx = window.AudioContext || window.webkitAudioContext;
-  var audioCtx = null;
+  const AudioCtxClass = window.AudioContext || window.webkitAudioContext;
+  let audioCtx = null;
 
   function initAudio() {
-    if (!audioCtx && AudioCtx) {
-      audioCtx = new AudioCtx();
+    if (!audioCtx && AudioCtxClass) {
+      audioCtx = new AudioCtxClass();
     }
     if (audioCtx && audioCtx.state === 'suspended') {
       audioCtx.resume();
@@ -313,8 +333,8 @@
 
   function playTone(freq, duration, type, volume) {
     if (!audioCtx) return;
-    var osc = audioCtx.createOscillator();
-    var gain = audioCtx.createGain();
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
     osc.connect(gain);
     gain.connect(audioCtx.destination);
     osc.type = type || 'sine';
@@ -326,7 +346,7 @@
   }
 
   function playCorrectSound() {
-    var baseFreq = 523 + gameState.currentStreak * 8;
+    let baseFreq = 523 + gameState.currentStreak * 8;
     baseFreq = Math.min(baseFreq, 1200);
     playTone(baseFreq, 0.08, 'sine', 0.12);
   }
@@ -337,18 +357,18 @@
 
   function playPurifySound() {
     playTone(523, 0.1, 'sine', 0.15);
-    setTimeout(function () { playTone(659, 0.1, 'sine', 0.15); }, 80);
-    setTimeout(function () { playTone(784, 0.15, 'sine', 0.15); }, 160);
+    setTimeout(() => { playTone(659, 0.1, 'sine', 0.15); }, 80);
+    setTimeout(() => { playTone(784, 0.15, 'sine', 0.15); }, 160);
   }
 
   function playRoundCompleteSound() {
     playTone(523, 0.1, 'sine', 0.18);
-    setTimeout(function () { playTone(659, 0.1, 'sine', 0.18); }, 80);
-    setTimeout(function () { playTone(784, 0.1, 'sine', 0.18); }, 160);
-    setTimeout(function () { playTone(1047, 0.2, 'sine', 0.18); }, 240);
+    setTimeout(() => { playTone(659, 0.1, 'sine', 0.18); }, 80);
+    setTimeout(() => { playTone(784, 0.1, 'sine', 0.18); }, 160);
+    setTimeout(() => { playTone(1047, 0.2, 'sine', 0.18); }, 240);
   }
 
-  var streakRewards = [
+  const streakRewards = [
     { days: 3, bonus: '初心不退', icon: '🌱' },
     { days: 7, bonus: '一週精進', icon: '🔥' },
     { days: 14, bonus: '兩週不懈', icon: '⭐' },
@@ -357,7 +377,7 @@
     { days: 100, bonus: '百日修行', icon: '👑' }
   ];
 
-  var dailyChallenges = [
+  const dailyChallenges = [
     '完成一輪零失誤淨化',
     '達成 15 連擊',
     '定力保持 100% 完成一根',
@@ -368,30 +388,33 @@
   ];
 
   // ===== 粒子效果物件池（限制 DOM 元素數量）=====
-  var MAX_PARTICLES = 30;
-  var activeParticles = 0;
+  const MAX_PARTICLES = 30;
+  let activeParticles = 0;
 
   function spawnCorrectParticles(x, y) {
-    var colors = ['#f4d03f', '#ff9800', '#4caf50', '#e8d5b7'];
-    var count = Math.min(6, MAX_PARTICLES - activeParticles);
+    const colors = ['#f4d03f', '#ff9800', '#4caf50', '#e8d5b7'];
+    const count = Math.min(6, MAX_PARTICLES - activeParticles);
     if (count <= 0) return;
 
-    for (var i = 0; i < count; i++) {
-      var particle = document.createElement('div');
+    for (let i = 0; i < count; i++) {
+      const particle = document.createElement('div');
       particle.className = 'correct-particle';
       particle.style.left = x + 'px';
       particle.style.top = y + 'px';
       particle.style.background = colors[(Math.random() * colors.length) | 0];
-      var angle = (Math.PI * 2 * i) / count + Math.random() * 0.5;
-      var distance = 40 + Math.random() * 30;
+      const angle = (Math.PI * 2 * i) / count + Math.random() * 0.5;
+      const distance = 40 + Math.random() * 30;
       particle.style.setProperty('--tx', Math.cos(angle) * distance + 'px');
       particle.style.setProperty('--ty', Math.sin(angle) * distance + 'px');
       document.body.appendChild(particle);
       activeParticles++;
 
-      // 動畫結束後移除
-      (function (p) {
-        var cleanup = function () {
+      // 動畫結束後移除（使用閉包保留參照）
+      ((p) => {
+        let removed = false;
+        const cleanup = () => {
+          if (removed) return;
+          removed = true;
           if (p.parentNode) p.parentNode.removeChild(p);
           activeParticles = Math.max(0, activeParticles - 1);
         };
@@ -405,43 +428,43 @@
   // ===== DOM 輔助 =====
   function showMessage(text, type) {
     type = type || 'info';
-    var msg = document.createElement('div');
+    const msg = document.createElement('div');
     msg.className = 'message ' + type;
     msg.textContent = text;
     document.body.appendChild(msg);
-    setTimeout(function () {
+    setTimeout(() => {
       if (msg.parentNode) msg.parentNode.removeChild(msg);
     }, 2000);
   }
 
   function showMilestone(text) {
-    var toast = document.createElement('div');
+    const toast = document.createElement('div');
     toast.className = 'milestone-toast';
     toast.textContent = text;
     document.body.appendChild(toast);
-    setTimeout(function () {
+    setTimeout(() => {
       if (toast.parentNode) toast.parentNode.removeChild(toast);
     }, 1600);
   }
 
   function showAchievement(ach) {
-    var popup = document.createElement('div');
+    const popup = document.createElement('div');
     popup.className = 'achievement-popup';
     popup.innerHTML = '<span class="icon">' + ach.icon + '</span>' + ach.name +
       '<br><small style="font-weight:normal;font-size:0.8rem">' + ach.desc + '</small>';
     document.body.appendChild(popup);
-    setTimeout(function () {
+    setTimeout(() => {
       if (popup.parentNode) popup.parentNode.removeChild(popup);
     }, 2200);
   }
 
   function showPerfectComplete(rootName) {
     if (gameState.rootErrorCount === 0) {
-      var perfect = document.createElement('div');
+      const perfect = document.createElement('div');
       perfect.className = 'perfect-complete';
-      perfect.textContent = '🪷 ' + rootName + '根 圓滿 🪷';
+      perfect.textContent = '\u{1F33F} ' + rootName + '\u6839 \u5713\u6EFF \u{1F33F}';
       document.body.appendChild(perfect);
-      setTimeout(function () {
+      setTimeout(() => {
         if (perfect.parentNode) perfect.parentNode.removeChild(perfect);
       }, 2100);
     }
@@ -449,10 +472,10 @@
 
   // ===== 遊戲邏輯 =====
   function initParticles() {
-    var container = document.getElementById('particles');
+    const container = document.getElementById('particles');
     if (!container) return;
-    for (var i = 0; i < 20; i++) {
-      var particle = document.createElement('div');
+    for (let i = 0; i < 20; i++) {
+      const particle = document.createElement('div');
       particle.className = 'particle';
       particle.style.left = Math.random() * 100 + '%';
       particle.style.animationDelay = Math.random() * 15 + 's';
@@ -463,39 +486,46 @@
 
   function selectMode(mode) {
     currentMode = mode;
-    var btns = document.querySelectorAll('.mode-btn');
-    for (var i = 0; i < btns.length; i++) {
-      var isActive = btns[i].getAttribute('data-mode') === mode;
+    const btns = document.querySelectorAll('.mode-btn');
+    for (let i = 0; i < btns.length; i++) {
+      const isActive = btns[i].getAttribute('data-mode') === mode;
       btns[i].classList.toggle('active', isActive);
     }
   }
 
   function calculateWPM() {
     if (!gameState.gameStartTime || gameState.correctChars < 2) return 0;
-    var elapsedMinutes = (Date.now() - gameState.gameStartTime) / 60000;
+    const elapsedMinutes = (Date.now() - gameState.gameStartTime) / 60000;
     if (elapsedMinutes < 0.05) return 0;
-    var wpm = Math.round(gameState.correctChars / elapsedMinutes);
+    const wpm = Math.round(gameState.correctChars / elapsedMinutes);
     return Math.min(999, wpm);
   }
 
   function updateWPMDisplay() {
-    var wpmDisplay = document.getElementById('wpm-display');
-    var wpmValue = document.getElementById('wpm-value');
-    if (!wpmDisplay || !wpmValue) return;
-    var wpm = calculateWPM();
-    if (wpm > 0) {
-      wpmDisplay.classList.remove('hidden');
-      wpmValue.textContent = wpm;
-      if (wpm >= 60) wpmValue.style.color = '#f4d03f';
-      else if (wpm >= 40) wpmValue.style.color = '#4caf50';
-      else if (wpm >= 20) wpmValue.style.color = '#8892a8';
-      else wpmValue.style.color = '#a0a8b8';
+    // 桌面版
+    const wpmDisplay = document.getElementById('wpm-display');
+    const wpmValue = document.getElementById('wpm-value');
+    if (wpmDisplay && wpmValue) {
+      const wpm = calculateWPM();
+      if (wpm > 0) {
+        wpmDisplay.classList.remove('hidden');
+        wpmValue.textContent = wpm;
+        if (wpm >= 60) wpmValue.style.color = '#f4d03f';
+        else if (wpm >= 40) wpmValue.style.color = '#4caf50';
+        else if (wpm >= 20) wpmValue.style.color = '#8892a8';
+        else wpmValue.style.color = '#a0a8b8';
+      }
+    }
+    // 手機版
+    const mghWpm = document.getElementById('mgh-wpm');
+    if (mghWpm) {
+      mghWpm.textContent = calculateWPM();
     }
   }
 
   function checkMilestone() {
-    for (var i = 0; i < milestones.length; i++) {
-      var m = milestones[i];
+    for (let i = 0; i < milestones.length; i++) {
+      const m = milestones[i];
       if (gameState.currentStreak === m.streak && !reachedMilestones.has(m.streak)) {
         reachedMilestones.add(m.streak);
         showMilestone(m.text);
@@ -505,7 +535,7 @@
   }
 
   function updateInputGlow() {
-    var input = document.getElementById('zen-input');
+    const input = document.getElementById('zen-input');
     if (!input) return;
     input.classList.remove('streak-glow', 'streak-fire');
     if (gameState.currentStreak >= 50) {
@@ -516,26 +546,32 @@
   }
 
   function updateCombo() {
-    var comboDisplay = document.getElementById('combo-display');
-    var comboCount = document.getElementById('combo-count');
-    var comboMultiplier = document.getElementById('combo-multiplier');
-    if (!comboDisplay || !comboCount || !comboMultiplier) return;
-
-    if (gameState.currentStreak >= 3) {
-      comboDisplay.classList.remove('hidden');
-      comboCount.textContent = gameState.currentStreak;
-      var multiplier = 1 + Math.floor(gameState.currentStreak / 5) * 0.1;
-      comboMultiplier.textContent = '\u00d7' + multiplier.toFixed(1);
-      comboCount.classList.add('pulse');
-      setTimeout(function () { comboCount.classList.remove('pulse'); }, 150);
-    } else {
-      comboDisplay.classList.add('hidden');
+    // 桌面版
+    const comboDisplay = document.getElementById('combo-display');
+    const comboCount = document.getElementById('combo-count');
+    const comboMultiplier = document.getElementById('combo-multiplier');
+    if (comboDisplay && comboCount && comboMultiplier) {
+      if (gameState.currentStreak >= 3) {
+        comboDisplay.classList.remove('hidden');
+        comboCount.textContent = gameState.currentStreak;
+        const multiplier = 1 + Math.floor(gameState.currentStreak / 5) * 0.1;
+        comboMultiplier.textContent = '\u00d7' + multiplier.toFixed(1);
+        comboCount.classList.add('pulse');
+        setTimeout(() => { comboCount.classList.remove('pulse'); }, 150);
+      } else {
+        comboDisplay.classList.add('hidden');
+      }
+    }
+    // 手機版
+    const mghCombo = document.getElementById('mgh-combo');
+    if (mghCombo) {
+      mghCombo.textContent = gameState.currentStreak;
     }
   }
 
   function checkAchievements() {
-    for (var i = 0; i < achievements.length; i++) {
-      var ach = achievements[i];
+    for (let i = 0; i < achievements.length; i++) {
+      const ach = achievements[i];
       if (!gameState.unlockedAchievements.has(ach.id) && ach.condition(gameState)) {
         gameState.unlockedAchievements.add(ach.id);
         showAchievement(ach);
@@ -544,7 +580,7 @@
   }
 
   function updateStats() {
-    var el;
+    let el;
     el = document.getElementById('round-count');
     if (el) el.textContent = gameState.roundCount;
     el = document.getElementById('purify-count');
@@ -552,7 +588,7 @@
     el = document.getElementById('best-streak');
     if (el) el.textContent = gameState.bestStreak;
 
-    var accuracy = gameState.totalChars > 0
+    const accuracy = gameState.totalChars > 0
       ? Math.round((gameState.correctChars / gameState.totalChars) * 100)
       : 100;
     el = document.getElementById('accuracy');
@@ -560,8 +596,8 @@
   }
 
   function updateFocusBar() {
-    var valueEl = document.getElementById('focus-value');
-    var fill = document.getElementById('focus-bar-fill');
+    const valueEl = document.getElementById('focus-value');
+    const fill = document.getElementById('focus-bar-fill');
     if (valueEl) valueEl.textContent = gameState.focus;
     if (fill) {
       fill.style.width = gameState.focus + '%';
@@ -573,10 +609,23 @@
     }
   }
 
+  // ===== 手機觸控提示管理 =====
+  function updateMobileInputHint(focused) {
+    const hint = document.getElementById('mobile-input-hint');
+    if (!hint) return;
+    if (focused) {
+      hint.textContent = '\u2328\uFE0F \u9375\u76E4\u5DF2\u958B\u555F\uFF0C\u8ACB\u8F38\u5165\u7985\u8A9E';
+      hint.classList.add('active');
+    } else {
+      hint.textContent = '\uD83D\uDC49 \u9EDE\u6B64\u958B\u555F\u9375\u76E4\u8F38\u5165\u7985\u8A9E';
+      hint.classList.remove('active');
+    }
+  }
+
   // ===== 統一字元處理（消除 handleInput 與 compositionend 的重複）=====
   function processChar(char) {
-    var targetText = gameState.currentZen.text;
-    var expectedChar = targetText[gameState.inputIndex];
+    const targetText = gameState.currentZen.text;
+    const expectedChar = targetText[gameState.inputIndex];
     gameState.totalChars++;
     gameState.lastInputTime = Date.now();
 
@@ -589,7 +638,7 @@
       if (gameState.currentStreak > gameState.bestStreak) {
         gameState.bestStreak = gameState.currentStreak;
       }
-      var focusGain = 5 + Math.floor(gameState.currentStreak / 10);
+      const focusGain = 5 + Math.floor(gameState.currentStreak / 10);
       gameState.focus = Math.min(100, gameState.focus + focusGain);
 
       updateCombo();
@@ -598,10 +647,10 @@
       updateWPMDisplay();
 
       // 粒子效果
-      var charEls = document.querySelectorAll('.zen-text .char');
-      var targetEl = charEls[gameState.inputIndex - 1];
+      const charEls = document.querySelectorAll('.zen-text .char');
+      const targetEl = charEls[gameState.inputIndex - 1];
       if (targetEl) {
-        var rect = targetEl.getBoundingClientRect();
+        const rect = targetEl.getBoundingClientRect();
         spawnCorrectParticles(rect.left + rect.width / 2, rect.top + rect.height / 2);
       }
 
@@ -616,11 +665,11 @@
 
       playWrongSound();
       // 抖動效果
-      var chars = document.querySelectorAll('.zen-text .char');
+      const chars = document.querySelectorAll('.zen-text .char');
       if (chars[gameState.inputIndex]) {
         chars[gameState.inputIndex].classList.add('wrong');
-        var wrongEl = chars[gameState.inputIndex];
-        setTimeout(function () { wrongEl.classList.remove('wrong'); }, 300);
+        const wrongEl = chars[gameState.inputIndex];
+        setTimeout(() => { wrongEl.classList.remove('wrong'); }, 300);
       }
 
       return false;
@@ -629,9 +678,10 @@
 
   // ===== 輸入事件處理 =====
   function handleInput(e) {
-    var input = e.target.value;
+    if (currentGameState !== GAME_STATE.PLAYING) return;
+    const input = e.target.value;
     if (input.length > 0 && !e.isComposing) {
-      var lastChar = input[input.length - 1];
+      const lastChar = input[input.length - 1];
       processChar(lastChar);
       displayZenText();
       updateStats();
@@ -646,10 +696,11 @@
   }
 
   function handleCompositionEnd(e) {
-    var composed = e.data;
+    if (currentGameState !== GAME_STATE.PLAYING) return;
+    const composed = e.data;
     if (!composed) return;
 
-    for (var i = 0; i < composed.length; i++) {
+    for (let i = 0; i < composed.length; i++) {
       processChar(composed[i]);
     }
 
@@ -665,12 +716,12 @@
   }
 
   function displayZenText() {
-    var container = document.getElementById('zen-text');
+    const container = document.getElementById('zen-text');
     if (!container || !gameState.currentZen) return;
-    var text = gameState.currentZen.text;
-    var html = '';
-    for (var i = 0; i < text.length; i++) {
-      var className = 'char';
+    const text = gameState.currentZen.text;
+    let html = '';
+    for (let i = 0; i < text.length; i++) {
+      let className = 'char';
       if (i < gameState.inputIndex) className += ' correct';
       else if (i === gameState.inputIndex) className += ' current';
       html += '<span class="' + className + '">' + text[i] + '</span>';
@@ -679,18 +730,24 @@
   }
 
   // ===== 閃電模式計時器（rAF + performance.now）=====
-  var lightningStartTime = 0;
-  var lightningDuration = 0;
-  var lightningRafId = null;
+  let lightningStartTime = 0;
+  let lightningDuration = 0;
+  let lightningRafId = null;
 
   function startLightningTimer() {
     if (currentMode !== 'lightning') return;
-    var zenLength = gameState.currentZen.text.length;
+    const zenLength = gameState.currentZen.text.length;
     lightningDuration = zenLength * modeConfig.lightning.timePerChar * 1000; // ms
     lightningStartTime = performance.now();
 
-    var timerEl = document.getElementById('lightning-timer');
+    const timerEl = document.getElementById('lightning-timer');
     if (timerEl) timerEl.classList.remove('hidden');
+
+    // 手機版閃電計時器顯示
+    const mghTimer = document.getElementById('mgh-timer');
+    const mghTimerLabel = document.getElementById('mgh-timer-label');
+    if (mghTimer) mghTimer.style.display = '';
+    if (mghTimerLabel) mghTimerLabel.style.display = '';
 
     if (lightningRafId) cancelAnimationFrame(lightningRafId);
 
@@ -699,14 +756,22 @@
         lightningRafId = requestAnimationFrame(updateTimer);
         return;
       }
-      var elapsed = performance.now() - lightningStartTime;
+      const elapsed = performance.now() - lightningStartTime;
       lightningTimeLeft = Math.max(0, (lightningDuration - elapsed) / 1000);
 
-      var timerValue = document.getElementById('lightning-timer-value');
+      // 桌面版
+      const timerValue = document.getElementById('lightning-timer-value');
       if (timerValue) {
         timerValue.textContent = lightningTimeLeft.toFixed(1);
         if (lightningTimeLeft <= 3) timerValue.classList.add('danger');
         else timerValue.classList.remove('danger');
+      }
+
+      // 手機版
+      const mghTimerVal = document.getElementById('mgh-timer');
+      if (mghTimerVal) {
+        mghTimerVal.textContent = lightningTimeLeft.toFixed(1);
+        mghTimerVal.style.color = lightningTimeLeft <= 3 ? '#f44336' : '#ff9800';
       }
 
       if (lightningTimeLeft <= 0) {
@@ -725,10 +790,16 @@
       cancelAnimationFrame(lightningRafId);
       lightningRafId = null;
     }
-    var timerEl = document.getElementById('lightning-timer');
-    var timerValueEl = document.getElementById('lightning-timer-value');
+    const timerEl = document.getElementById('lightning-timer');
+    const timerValueEl = document.getElementById('lightning-timer-value');
     if (timerEl) timerEl.classList.add('hidden');
     if (timerValueEl) timerValueEl.classList.remove('danger');
+
+    // 手機版隱藏
+    const mghTimer = document.getElementById('mgh-timer');
+    const mghTimerLabel = document.getElementById('mgh-timer-label');
+    if (mghTimer) mghTimer.style.display = 'none';
+    if (mghTimerLabel) mghTimerLabel.style.display = 'none';
   }
 
   function handleLightningTimeout() {
@@ -737,9 +808,9 @@
     updateCombo();
     updateFocusBar();
     updateInputGlow();
-    showMessage('⏰ 時間到！', 'info');
-    setTimeout(function () {
-      var input = document.getElementById('zen-input');
+    showMessage('\u23F0 \u6642\u9593\u5230\uFF01', 'info');
+    setTimeout(() => {
+      const input = document.getElementById('zen-input');
       if (input) input.value = '';
       nextRoot();
     }, 1000);
@@ -747,6 +818,7 @@
 
   // ===== 暫停功能 =====
   function togglePause() {
+    if (currentGameState !== GAME_STATE.PLAYING && currentGameState !== GAME_STATE.PAUSED) return;
     if (isPaused) {
       resumeGame();
     } else {
@@ -754,32 +826,33 @@
     }
   }
 
-  var pauseStartTime = 0;
+  let pauseStartTime = 0;
 
   function pauseGame() {
     isPaused = true;
+    currentGameState = GAME_STATE.PAUSED;
     pauseStartTime = performance.now();
-    var input = document.getElementById('zen-input');
+    const input = document.getElementById('zen-input');
     if (input) input.disabled = true;
 
-    var overlay = document.createElement('div');
+    const overlay = document.createElement('div');
     overlay.className = 'pause-overlay';
     overlay.id = 'pause-overlay';
     overlay.innerHTML =
-      '<h2>修行暫停</h2>' +
-      '<p>按 Esc 或點擊繼續</p>' +
-      '<button class="btn btn-primary" id="resumeBtn">繼續修行</button>' +
-      '<button class="btn btn-secondary" id="quitBtn" style="margin-top: 0.5rem; margin-left: 0;">結束修行</button>';
+      '<h2>\u4FEE\u884C\u66AB\u505C</h2>' +
+      '<p>\u6309 Esc \u6216\u9EDE\u64CA\u7E7C\u7E8C</p>' +
+      '<button class="btn btn-primary" id="resumeBtn">\u7E7C\u7E8C\u4FEE\u884C</button>' +
+      '<button class="btn btn-secondary" id="quitBtn" style="margin-top: 0.5rem; margin-left: 0;">\u7D50\u675F\u4FEE\u884C</button>';
     document.body.appendChild(overlay);
 
-    var resumeBtn = document.getElementById('resumeBtn');
+    const resumeBtn = document.getElementById('resumeBtn');
     if (resumeBtn) resumeBtn.addEventListener('click', resumeGame);
-    var quitBtn = document.getElementById('quitBtn');
-    if (quitBtn) quitBtn.addEventListener('click', function () {
+    const quitBtn = document.getElementById('quitBtn');
+    if (quitBtn) quitBtn.addEventListener('click', () => {
       resumeGame();
       endGame();
     });
-    overlay.addEventListener('click', function (e) {
+    overlay.addEventListener('click', (e) => {
       if (e.target === overlay) resumeGame();
     });
   }
@@ -787,17 +860,43 @@
   function resumeGame() {
     // 補償暫停期間的時間（閃電模式計時不應在暫停期間流逝）
     if (pauseStartTime > 0) {
-      var pausedDuration = performance.now() - pauseStartTime;
+      const pausedDuration = performance.now() - pauseStartTime;
       lightningStartTime += pausedDuration;
       pauseStartTime = 0;
     }
     isPaused = false;
-    var overlay = document.getElementById('pause-overlay');
+    currentGameState = GAME_STATE.PLAYING;
+    const overlay = document.getElementById('pause-overlay');
     if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
-    var input = document.getElementById('zen-input');
+    const input = document.getElementById('zen-input');
     if (input) {
       input.disabled = false;
       input.focus();
+    }
+  }
+
+  // ===== 狀態切換輔助 =====
+  function transitionTo(newState) {
+    currentGameState = newState;
+    const startScreen = document.getElementById('start-screen');
+    const gameScreen = document.getElementById('game-screen');
+    const resultScreen = document.getElementById('result-screen');
+
+    switch (newState) {
+      case GAME_STATE.START:
+        if (startScreen) startScreen.classList.remove('hidden');
+        if (gameScreen) gameScreen.classList.add('hidden');
+        if (resultScreen) resultScreen.style.display = 'none';
+        break;
+      case GAME_STATE.PLAYING:
+        if (startScreen) startScreen.classList.add('hidden');
+        if (gameScreen) gameScreen.classList.remove('hidden');
+        if (resultScreen) resultScreen.style.display = 'none';
+        break;
+      case GAME_STATE.RESULT:
+        if (gameScreen) gameScreen.classList.add('hidden');
+        if (resultScreen) resultScreen.style.display = 'block';
+        break;
     }
   }
 
@@ -806,7 +905,7 @@
     initAudio();
     savedProgress.totalPlays++;
     savedProgress = updateConsecutiveDays(savedProgress);
-    var previousAchievements = new Set(savedProgress.unlockedAchievements || []);
+    const previousAchievements = new Set(savedProgress.unlockedAchievements || []);
 
     gameState = {
       currentRoot: null,
@@ -833,41 +932,55 @@
     reachedMilestones = new Set();
     saveProgress(savedProgress);
 
-    var comboDisplay = document.getElementById('combo-display');
-    var wpmDisplay = document.getElementById('wpm-display');
+    const comboDisplay = document.getElementById('combo-display');
+    const wpmDisplay = document.getElementById('wpm-display');
     if (comboDisplay) comboDisplay.classList.add('hidden');
     if (wpmDisplay) wpmDisplay.classList.add('hidden');
     stopLightningTimer();
 
-    var input = document.getElementById('zen-input');
+    const input = document.getElementById('zen-input');
     if (input) input.classList.remove('streak-glow', 'streak-fire');
 
-    var rootIcons = document.querySelectorAll('.root-icon');
-    for (var i = 0; i < rootIcons.length; i++) {
+    const rootIcons = document.querySelectorAll('.root-icon');
+    for (let i = 0; i < rootIcons.length; i++) {
       rootIcons[i].classList.remove('active', 'purified');
     }
 
-    document.getElementById('start-screen').classList.add('hidden');
-    document.getElementById('result-screen').classList.add('hidden');
-    document.getElementById('game-screen').classList.remove('hidden');
+    // 重設手機版統計
+    const mghCombo = document.getElementById('mgh-combo');
+    const mghWpm = document.getElementById('mgh-wpm');
+    if (mghCombo) mghCombo.textContent = '0';
+    if (mghWpm) mghWpm.textContent = '0';
 
-    var modeName = modeConfig[currentMode].name;
-    showMessage(modeName + '開始！', 'info');
+    // 使用狀態機切換
+    transitionTo(GAME_STATE.PLAYING);
+
+    const modeName = modeConfig[currentMode].name;
+    showMessage(modeName + '\u958B\u59CB\uFF01', 'info');
 
     updateStats();
     updateFocusBar();
     nextRoot();
 
-    if (input) input.focus();
+    // 聚焦輸入框（延遲以確保 DOM 更新完成）
+    if (input) {
+      setTimeout(() => {
+        input.focus();
+        // 手機裝置額外處理
+        if (isTouchDevice) {
+          input.click();
+        }
+      }, 100);
+    }
   }
 
   function nextRoot() {
-    var availableRoots = rootOrder.filter(function (r) { return !gameState.purifiedRoots.has(r); });
+    const availableRoots = rootOrder.filter((r) => !gameState.purifiedRoots.has(r));
     if (availableRoots.length === 0) {
       completeRound();
       return;
     }
-    var randomRoot = availableRoots[(Math.random() * availableRoots.length) | 0];
+    const randomRoot = availableRoots[(Math.random() * availableRoots.length) | 0];
     selectRoot(randomRoot);
   }
 
@@ -877,52 +990,56 @@
     gameState.rootStartTime = Date.now();
     gameState.rootErrorCount = 0;
 
-    var rootIcons = document.querySelectorAll('.root-icon');
-    for (var i = 0; i < rootIcons.length; i++) {
+    const rootIcons = document.querySelectorAll('.root-icon');
+    for (let i = 0; i < rootIcons.length; i++) {
       rootIcons[i].classList.remove('active');
       if (rootIcons[i].getAttribute('data-root') === root) {
         rootIcons[i].classList.add('active');
       }
     }
 
-    var useDeep = modeConfig[currentMode].useDeepZen;
-    var zenSource = useDeep ? deepZenTexts : zenTexts;
-    var zens = zenSource[root];
+    const useDeep = modeConfig[currentMode].useDeepZen;
+    const zenSource = useDeep ? deepZenTexts : zenTexts;
+    const zens = zenSource[root];
 
     if (!gameState.usedZens[root]) gameState.usedZens[root] = [];
 
-    var availableZens = zens.filter(function (z) {
-      return gameState.usedZens[root].indexOf(z.text) === -1;
-    });
+    let availableZens = zens.filter((z) => gameState.usedZens[root].indexOf(z.text) === -1);
     if (availableZens.length === 0) {
       gameState.usedZens[root] = [];
       availableZens = zens;
     }
 
-    var zen = availableZens[(Math.random() * availableZens.length) | 0];
+    const zen = availableZens[(Math.random() * availableZens.length) | 0];
     gameState.usedZens[root].push(zen.text);
     gameState.currentZen = zen;
 
     displayZenText();
-    var meaningEl = document.getElementById('zen-meaning');
-    if (meaningEl) meaningEl.textContent = '— ' + zen.meaning;
+    const meaningEl = document.getElementById('zen-meaning');
+    if (meaningEl) meaningEl.textContent = '\u2014 ' + zen.meaning;
 
-    var input = document.getElementById('zen-input');
-    if (input) input.value = '';
+    const input = document.getElementById('zen-input');
+    if (input) {
+      input.value = '';
+      // 確保輸入框保持聚焦
+      if (currentGameState === GAME_STATE.PLAYING) {
+        input.focus();
+      }
+    }
 
     if (currentMode === 'lightning') startLightningTimer();
 
-    showMessage('淨化「' + rootNames[root] + '」根', 'info');
+    showMessage('\u6DE8\u5316\u300C' + rootNames[root] + '\u300D\u6839', 'info');
   }
 
   function purifyRoot() {
-    var root = gameState.currentRoot;
+    const root = gameState.currentRoot;
     gameState.purifiedRoots.add(root);
     gameState.purifyCount++;
 
     stopLightningTimer();
 
-    var icon = document.querySelector('.root-icon[data-root="' + root + '"]');
+    const icon = document.querySelector('.root-icon[data-root="' + root + '"]');
     if (icon) {
       icon.classList.remove('active');
       icon.classList.add('purified');
@@ -930,12 +1047,12 @@
 
     playPurifySound();
     showPerfectComplete(rootNames[root]);
-    showMessage('「' + rootNames[root] + '」根已淨化！', 'success');
+    showMessage('\u300C' + rootNames[root] + '\u300D\u6839\u5DF2\u6DE8\u5316\uFF01', 'success');
     updateStats();
     checkAchievements();
 
-    setTimeout(function () {
-      var input = document.getElementById('zen-input');
+    setTimeout(() => {
+      const input = document.getElementById('zen-input');
       if (input) input.value = '';
       nextRoot();
     }, 1000);
@@ -945,13 +1062,13 @@
     gameState.roundCount++;
     gameState.purifiedRoots.clear();
 
-    var rootIcons = document.querySelectorAll('.root-icon');
-    for (var i = 0; i < rootIcons.length; i++) {
+    const rootIcons = document.querySelectorAll('.root-icon');
+    for (let i = 0; i < rootIcons.length; i++) {
       rootIcons[i].classList.remove('purified');
     }
 
     playRoundCompleteSound();
-    showMessage('第 ' + (gameState.roundCount - 1) + ' 輪圓滿！進入第 ' + gameState.roundCount + ' 輪', 'success');
+    showMessage('\u7B2C ' + (gameState.roundCount - 1) + ' \u8F2A\u5713\u6EFF\uFF01\u9032\u5165\u7B2C ' + gameState.roundCount + ' \u8F2A', 'success');
     updateStats();
     checkAchievements();
     setTimeout(nextRoot, 1500);
@@ -960,17 +1077,17 @@
   function endGame() {
     stopLightningTimer();
 
-    var wpmDisplay = document.getElementById('wpm-display');
+    const wpmDisplay = document.getElementById('wpm-display');
     if (wpmDisplay) wpmDisplay.classList.add('hidden');
 
-    var input = document.getElementById('zen-input');
+    const input = document.getElementById('zen-input');
     if (input) input.classList.remove('streak-glow', 'streak-fire');
 
-    document.getElementById('game-screen').classList.add('hidden');
-    document.getElementById('result-screen').style.display = 'block';
+    // 使用狀態機切換
+    transitionTo(GAME_STATE.RESULT);
 
-    var finalRounds = gameState.roundCount - 1 || 0;
-    var accuracy = gameState.totalChars > 0
+    const finalRounds = gameState.roundCount - 1 || 0;
+    const accuracy = gameState.totalChars > 0
       ? Math.round((gameState.correctChars / gameState.totalChars) * 100)
       : 100;
 
@@ -985,7 +1102,7 @@
     savedProgress.unlockedAchievements = Array.from(gameState.unlockedAchievements);
     saveProgress(savedProgress);
 
-    var el;
+    let el;
     el = document.getElementById('final-rounds');
     if (el) el.textContent = finalRounds;
     el = document.getElementById('final-purify');
@@ -999,9 +1116,9 @@
   }
 
   function updateResultHistoryDisplay() {
-    var historyDiv = document.getElementById('history-stats');
+    let historyDiv = document.getElementById('history-stats');
     if (!historyDiv) {
-      var resultStats = document.querySelector('.result-stats');
+      const resultStats = document.querySelector('.result-stats');
       if (!resultStats) return;
       historyDiv = document.createElement('div');
       historyDiv.id = 'history-stats';
@@ -1009,24 +1126,24 @@
       resultStats.appendChild(historyDiv);
     }
 
-    var currentLevel = getCultivationLevel(savedProgress.totalPurify);
-    var progress = getLevelProgress(savedProgress.totalPurify);
-    var nextLevelInfo = getNextLevelInfo(savedProgress.totalPurify);
+    const currentLevel = getCultivationLevel(savedProgress.totalPurify);
+    const progress = getLevelProgress(savedProgress.totalPurify);
+    const nextLevelInfo = getNextLevelInfo(savedProgress.totalPurify);
 
-    var prevTotalPurify = savedProgress.totalPurify - gameState.purifyCount;
-    var prevLevel = getCultivationLevel(prevTotalPurify);
-    var leveledUp = currentLevel.name !== prevLevel.name;
+    const prevTotalPurify = savedProgress.totalPurify - gameState.purifyCount;
+    const prevLevel = getCultivationLevel(prevTotalPurify);
+    const leveledUp = currentLevel.name !== prevLevel.name;
 
-    var levelUpHtml = '';
+    let levelUpHtml = '';
     if (leveledUp) {
       levelUpHtml =
         '<div style="background: linear-gradient(135deg, rgba(244,208,63,0.2), rgba(255,152,0,0.2)); border: 1px solid rgba(244,208,63,0.4); border-radius: 0.5rem; padding: 0.75rem; margin-bottom: 1rem;">' +
-        '<div style="font-size: 1.2rem; margin-bottom: 0.25rem;">🎊 境界提升！</div>' +
-        '<div style="color: #8892a8;">' + prevLevel.icon + ' ' + prevLevel.name + ' → <span style="color: #f4d03f; font-size: 1.1rem;">' + currentLevel.icon + ' ' + currentLevel.name + '</span></div>' +
+        '<div style="font-size: 1.2rem; margin-bottom: 0.25rem;">\uD83C\uDF8A \u5883\u754C\u63D0\u5347\uFF01</div>' +
+        '<div style="color: #8892a8;">' + prevLevel.icon + ' ' + prevLevel.name + ' \u2192 <span style="color: #f4d03f; font-size: 1.1rem;">' + currentLevel.icon + ' ' + currentLevel.name + '</span></div>' +
         '</div>';
     }
 
-    var progressHtml = '';
+    let progressHtml = '';
     if (nextLevelInfo) {
       progressHtml =
         '<div style="margin: 1rem 0;">' +
@@ -1036,56 +1153,55 @@
         '<div style="max-width: 250px; margin: 0 auto;">' +
         '<div style="width: 100%; height: 8px; background: rgba(0,0,0,0.3); border-radius: 4px; overflow: hidden;">' +
         '<div style="width: ' + progress + '%; height: 100%; background: linear-gradient(90deg, #f4d03f, #ff9800); border-radius: 4px;"></div></div>' +
-        '<div style="font-size: 0.75rem; color: #8892a8; margin-top: 0.25rem;">距離 ' + nextLevelInfo.icon + ' ' + nextLevelInfo.name + ' 還需 ' + nextLevelInfo.needed + ' 次淨化</div>' +
+        '<div style="font-size: 0.75rem; color: #8892a8; margin-top: 0.25rem;">\u8DDD\u96E2 ' + nextLevelInfo.icon + ' ' + nextLevelInfo.name + ' \u9084\u9700 ' + nextLevelInfo.needed + ' \u6B21\u6DE8\u5316</div>' +
         '</div></div>';
     } else {
       progressHtml =
         '<div style="margin: 1rem 0; text-align: center;">' +
         '<span style="font-size: 1.5rem;">' + currentLevel.icon + '</span>' +
         '<span style="color: #f4d03f; font-size: 1.2rem; font-weight: bold;">' + currentLevel.name + '</span>' +
-        '<div style="color: #4caf50; font-size: 0.9rem; margin-top: 0.25rem;">✨ 已達最高境界 ✨</div></div>';
+        '<div style="color: #4caf50; font-size: 0.9rem; margin-top: 0.25rem;">\u2728 \u5DF2\u9054\u6700\u9AD8\u5883\u754C \u2728</div></div>';
     }
 
     historyDiv.innerHTML =
       levelUpHtml + progressHtml +
       '<div style="border-top: 1px solid rgba(255,255,255,0.1); padding-top: 0.75rem; margin-top: 0.75rem;">' +
-      '<p style="color: #8892a8; font-size: 0.85rem; margin-bottom: 0.5rem;">📜 歷史紀錄</p>' +
-      '<p style="font-size: 0.9rem;">累計修行：<span style="color: #f4d03f;">' + savedProgress.totalPlays + '</span> 次 · 累計淨化：<span style="color: #4caf50;">' + savedProgress.totalPurify + '</span> 次</p>' +
-      '<p style="font-size: 0.9rem;">最佳連擊：<span style="color: #ff9800;">' + savedProgress.allTimeBestStreak + '</span> · 最佳輪數：<span style="color: #e8d5b7;">' + savedProgress.allTimeBestRound + '</span> 輪</p>' +
-      (savedProgress.consecutiveDays > 1 ? '<p style="font-size: 0.9rem;">連續修行：<span style="color: #f4d03f;">🔥 ' + savedProgress.consecutiveDays + ' 天</span></p>' : '') +
+      '<p style="color: #8892a8; font-size: 0.85rem; margin-bottom: 0.5rem;">\uD83D\uDCDC \u6B77\u53F2\u7D00\u9304</p>' +
+      '<p style="font-size: 0.9rem;">\u7D2F\u8A08\u4FEE\u884C\uFF1A<span style="color: #f4d03f;">' + savedProgress.totalPlays + '</span> \u6B21 \u00B7 \u7D2F\u8A08\u6DE8\u5316\uFF1A<span style="color: #4caf50;">' + savedProgress.totalPurify + '</span> \u6B21</p>' +
+      '<p style="font-size: 0.9rem;">\u6700\u4F73\u9023\u64CA\uFF1A<span style="color: #ff9800;">' + savedProgress.allTimeBestStreak + '</span> \u00B7 \u6700\u4F73\u8F2A\u6578\uFF1A<span style="color: #e8d5b7;">' + savedProgress.allTimeBestRound + '</span> \u8F2A</p>' +
+      (savedProgress.consecutiveDays > 1 ? '<p style="font-size: 0.9rem;">\u9023\u7E8C\u4FEE\u884C\uFF1A<span style="color: #f4d03f;">\uD83D\uDD25 ' + savedProgress.consecutiveDays + ' \u5929</span></p>' : '') +
       '</div>';
   }
 
   function showStart() {
-    document.getElementById('result-screen').style.display = 'none';
-    document.getElementById('start-screen').classList.remove('hidden');
+    transitionTo(GAME_STATE.START);
     updateStartScreen();
   }
 
   function shareScore() {
-    var finalRounds = gameState.roundCount - 1 || 0;
-    var accuracy = gameState.totalChars > 0
+    const finalRounds = gameState.roundCount - 1 || 0;
+    const accuracy = gameState.totalChars > 0
       ? Math.round((gameState.correctChars / gameState.totalChars) * 100) : 100;
 
-    var comment = '';
-    if (gameState.bestStreak >= 50) comment = '禪定深厚！';
-    else if (gameState.bestStreak >= 25) comment = '心神專注！';
-    else if (accuracy >= 98) comment = '精準無誤！';
-    else if (finalRounds >= 3) comment = '精進不懈！';
-    else comment = '初心修行！';
+    let comment = '';
+    if (gameState.bestStreak >= 50) comment = '\u7985\u5B9A\u6DF1\u539A\uFF01';
+    else if (gameState.bestStreak >= 25) comment = '\u5FC3\u795E\u5C08\u6CE8\uFF01';
+    else if (accuracy >= 98) comment = '\u7CBE\u6E96\u7121\u8AA4\uFF01';
+    else if (finalRounds >= 3) comment = '\u7CBE\u9032\u4E0D\u61C8\uFF01';
+    else comment = '\u521D\u5FC3\u4FEE\u884C\uFF01';
 
-    var shareText = '🧘 六根淨化 · 禪修打字\n\n' + comment + '\n\n' +
-      '📿 完成 ' + finalRounds + ' 輪修行\n' +
-      '✨ 淨化 ' + gameState.purifyCount + ' 次\n' +
-      '🎯 準確率 ' + accuracy + '%\n' +
-      '🔥 最佳連擊 ' + gameState.bestStreak + '\n' +
-      (savedProgress.consecutiveDays > 1 ? '📅 連續修行 ' + savedProgress.consecutiveDays + ' 天\n' : '') +
-      '\n心若冰清，天塌不驚 🪷';
+    const shareText = '\uD83E\uDDD8 \u516D\u6839\u6DE8\u5316 \u00B7 \u7985\u4FEE\u6253\u5B57\n\n' + comment + '\n\n' +
+      '\uD83D\uDCFF \u5B8C\u6210 ' + finalRounds + ' \u8F2A\u4FEE\u884C\n' +
+      '\u2728 \u6DE8\u5316 ' + gameState.purifyCount + ' \u6B21\n' +
+      '\uD83C\uDFAF \u6E96\u78BA\u7387 ' + accuracy + '%\n' +
+      '\uD83D\uDD25 \u6700\u4F73\u9023\u64CA ' + gameState.bestStreak + '\n' +
+      (savedProgress.consecutiveDays > 1 ? '\uD83D\uDCC5 \u9023\u7E8C\u4FEE\u884C ' + savedProgress.consecutiveDays + ' \u5929\n' : '') +
+      '\n\u5FC3\u82E5\u51B0\u6E05\uFF0C\u5929\u5857\u4E0D\u9A5A \u{1F33F}';
 
     if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(shareText).then(function () {
-        showMessage('成績已複製到剪貼簿！', 'success');
-      }).catch(function () {
+      navigator.clipboard.writeText(shareText).then(() => {
+        showMessage('\u6210\u7E3E\u5DF2\u8907\u88FD\u5230\u526A\u8CBC\u7C3F\uFF01', 'success');
+      }).catch(() => {
         fallbackCopy(shareText);
       });
     } else {
@@ -1094,29 +1210,29 @@
   }
 
   function fallbackCopy(text) {
-    var textArea = document.createElement('textarea');
+    const textArea = document.createElement('textarea');
     textArea.value = text;
     textArea.style.cssText = 'position:fixed;opacity:0;left:-9999px';
     document.body.appendChild(textArea);
     textArea.select();
     try {
       document.execCommand('copy');
-      showMessage('成績已複製到剪貼簿！', 'success');
+      showMessage('\u6210\u7E3E\u5DF2\u8907\u88FD\u5230\u526A\u8CBC\u7C3F\uFF01', 'success');
     } catch (e) {
-      showMessage('複製失敗，請手動選取', 'info');
+      showMessage('\u8907\u88FD\u5931\u6557\uFF0C\u8ACB\u624B\u52D5\u9078\u53D6', 'info');
     }
     document.body.removeChild(textArea);
   }
 
   function getTodayChallenge() {
-    var today = new Date();
-    var dayOfYear = Math.floor((today - new Date(today.getFullYear(), 0, 0)) / 86400000);
+    const today = new Date();
+    const dayOfYear = Math.floor((today - new Date(today.getFullYear(), 0, 0)) / 86400000);
     return dailyChallenges[dayOfYear % dailyChallenges.length];
   }
 
   function updateStartScreen() {
-    var streakBadge = document.getElementById('streak-badge');
-    var streakDays = document.getElementById('streak-days');
+    const streakBadge = document.getElementById('streak-badge');
+    const streakDays = document.getElementById('streak-days');
     if (streakBadge) {
       if (savedProgress.consecutiveDays > 1) {
         streakBadge.classList.remove('hidden');
@@ -1126,18 +1242,18 @@
       }
     }
 
-    var historyDiv = document.getElementById('start-history');
+    const historyDiv = document.getElementById('start-history');
     if (!historyDiv) return;
 
-    var currentLevel = getCultivationLevel(savedProgress.totalPurify);
-    var progress = getLevelProgress(savedProgress.totalPurify);
-    var nextLevelInfo = getNextLevelInfo(savedProgress.totalPurify);
+    const currentLevel = getCultivationLevel(savedProgress.totalPurify);
+    const progress = getLevelProgress(savedProgress.totalPurify);
+    const nextLevelInfo = getNextLevelInfo(savedProgress.totalPurify);
 
-    var levelHtml =
+    let levelHtml =
       '<div style="margin-bottom: 0.75rem;">' +
       '<span style="font-size: 1.5rem;">' + currentLevel.icon + '</span>' +
       '<span style="color: #f4d03f; font-size: 1.1rem; font-weight: bold;">' + currentLevel.name + '</span>' +
-      '<span style="color: #8892a8; font-size: 0.85rem; margin-left: 0.5rem;">累計淨化 ' + savedProgress.totalPurify + ' 次</span>' +
+      '<span style="color: #8892a8; font-size: 0.85rem; margin-left: 0.5rem;">\u7D2F\u8A08\u6DE8\u5316 ' + savedProgress.totalPurify + ' \u6B21</span>' +
       '</div>';
 
     if (nextLevelInfo) {
@@ -1145,38 +1261,38 @@
         '<div style="max-width: 280px; margin: 0 auto;">' +
         '<div style="display: flex; justify-content: space-between; font-size: 0.75rem; color: #8892a8; margin-bottom: 0.25rem;">' +
         '<span>' + currentLevel.name + '</span>' +
-        '<span>距離 ' + nextLevelInfo.icon + ' ' + nextLevelInfo.name + ' 還需 ' + nextLevelInfo.needed + ' 次</span></div>' +
+        '<span>\u8DDD\u96E2 ' + nextLevelInfo.icon + ' ' + nextLevelInfo.name + ' \u9084\u9700 ' + nextLevelInfo.needed + ' \u6B21</span></div>' +
         '<div style="width: 100%; height: 6px; background: rgba(0,0,0,0.3); border-radius: 3px; overflow: hidden;">' +
         '<div style="width: ' + progress + '%; height: 100%; background: linear-gradient(90deg, #f4d03f, #ff9800); border-radius: 3px;"></div>' +
         '</div></div>';
     } else {
-      levelHtml += '<div style="color: #4caf50; font-size: 0.9rem;">✨ 已達最高境界 ✨</div>';
+      levelHtml += '<div style="color: #4caf50; font-size: 0.9rem;">\u2728 \u5DF2\u9054\u6700\u9AD8\u5883\u754C \u2728</div>';
     }
 
     if (savedProgress.totalPlays > 0) {
       levelHtml +=
         '<div style="margin-top: 0.75rem; font-size: 0.85rem; color: #8892a8;">' +
-        '修行 <span style="color: #f4d03f;">' + savedProgress.totalPlays + '</span> 次 · ' +
-        '最佳連擊 <span style="color: #ff9800;">' + savedProgress.allTimeBestStreak + '</span> · ' +
-        '最佳輪數 <span style="color: #e8d5b7;">' + savedProgress.allTimeBestRound + '</span></div>';
+        '\u4FEE\u884C <span style="color: #f4d03f;">' + savedProgress.totalPlays + '</span> \u6B21 \u00B7 ' +
+        '\u6700\u4F73\u9023\u64CA <span style="color: #ff9800;">' + savedProgress.allTimeBestStreak + '</span> \u00B7 ' +
+        '\u6700\u4F73\u8F2A\u6578 <span style="color: #e8d5b7;">' + savedProgress.allTimeBestRound + '</span></div>';
     }
 
     historyDiv.innerHTML = levelHtml;
 
-    var challengeDiv = document.getElementById('daily-challenge');
-    var challengeText = document.getElementById('daily-challenge-text');
+    const challengeDiv = document.getElementById('daily-challenge');
+    const challengeText = document.getElementById('daily-challenge-text');
     if (challengeDiv) challengeDiv.classList.remove('hidden');
     if (challengeText) challengeText.textContent = getTodayChallenge();
   }
 
   function checkDailyReward() {
-    var today = getTodayStr();
+    const today = getTodayStr();
     if (savedProgress.lastPlayDate !== today && savedProgress.consecutiveDays >= 1) {
-      var yesterday = new Date();
+      const yesterday = new Date();
       yesterday.setDate(yesterday.getDate() - 1);
-      var yesterdayStr = yesterday.toISOString().slice(0, 10);
+      const yesterdayStr = yesterday.toISOString().slice(0, 10);
 
-      var projectedStreak = 1;
+      let projectedStreak = 1;
       if (savedProgress.lastPlayDate === yesterdayStr) {
         projectedStreak = savedProgress.consecutiveDays + 1;
       }
@@ -1187,32 +1303,32 @@
   }
 
   function showDailyRewardPopup(streakDays) {
-    var reward = null;
-    for (var i = 0; i < streakRewards.length; i++) {
+    let reward = null;
+    for (let i = 0; i < streakRewards.length; i++) {
       if (streakDays >= streakRewards[i].days) reward = streakRewards[i];
     }
 
-    var popup = document.createElement('div');
+    const popup = document.createElement('div');
     popup.className = 'daily-reward-popup';
     popup.innerHTML =
       '<div class="daily-reward-content">' +
-      '<div class="daily-reward-icon">🌅</div>' +
-      '<div class="daily-reward-title">歡迎回來！</div>' +
-      '<div style="color: #8892a8;">持續修行，功不唐捐</div>' +
-      '<div class="daily-reward-streak">🔥 連續 ' + streakDays + ' 天</div>' +
-      (reward ? '<div class="daily-reward-bonus">' + reward.icon + ' 達成成就：' + reward.bonus + '</div>' : '') +
-      '<button class="btn btn-primary daily-reward-btn" id="dailyRewardCloseBtn">開始今日修行</button>' +
+      '<div class="daily-reward-icon">\uD83C\uDF05</div>' +
+      '<div class="daily-reward-title">\u6B61\u8FCE\u56DE\u4F86\uFF01</div>' +
+      '<div style="color: #8892a8;">\u6301\u7E8C\u4FEE\u884C\uFF0C\u529F\u4E0D\u5510\u6350</div>' +
+      '<div class="daily-reward-streak">\uD83D\uDD25 \u9023\u7E8C ' + streakDays + ' \u5929</div>' +
+      (reward ? '<div class="daily-reward-bonus">' + reward.icon + ' \u9054\u6210\u6210\u5C31\uFF1A' + reward.bonus + '</div>' : '') +
+      '<button class="btn btn-primary daily-reward-btn" id="dailyRewardCloseBtn">\u958B\u59CB\u4ECA\u65E5\u4FEE\u884C</button>' +
       '</div>';
     document.body.appendChild(popup);
 
-    var closeBtn = document.getElementById('dailyRewardCloseBtn');
+    const closeBtn = document.getElementById('dailyRewardCloseBtn');
     if (closeBtn) {
-      closeBtn.addEventListener('click', function () {
+      closeBtn.addEventListener('click', () => {
         if (popup.parentNode) popup.parentNode.removeChild(popup);
       });
     }
 
-    popup.addEventListener('click', function (e) {
+    popup.addEventListener('click', (e) => {
       if (e.target === popup && popup.parentNode) popup.parentNode.removeChild(popup);
     });
   }
@@ -1223,60 +1339,94 @@
     updateStartScreen();
     checkDailyReward();
 
-    var input = document.getElementById('zen-input');
+    const input = document.getElementById('zen-input');
     if (input) {
       input.addEventListener('input', handleInput);
       input.addEventListener('compositionend', handleCompositionEnd);
-      input.addEventListener('keydown', function (e) {
+      input.addEventListener('keydown', (e) => {
         // 防止空格觸發滾動
         if (e.key === ' ') e.preventDefault();
-        // Escape 鍵：遊戲中暫停/繼續
-        if (e.key === 'Escape') {
-          e.preventDefault();
-          togglePause();
+        // Escape 由全域 document keydown 統一處理，避免雙重觸發
+      });
+
+      // 手機觸控：追蹤輸入框聚焦狀態以更新提示
+      input.addEventListener('focus', () => {
+        updateMobileInputHint(true);
+      });
+      input.addEventListener('blur', () => {
+        updateMobileInputHint(false);
+        // 手機端：如果遊戲進行中且非暫停，延遲重新聚焦
+        // （防止用戶意外失焦導致無法輸入）
+        if (currentGameState === GAME_STATE.PLAYING && !isPaused) {
+          setTimeout(() => {
+            if (currentGameState === GAME_STATE.PLAYING && !isPaused) {
+              input.focus();
+            }
+          }, 300);
         }
       });
     }
 
-    // 模式選擇按鈕（取代 inline onclick）
-    var modeBtns = document.querySelectorAll('.mode-btn[data-mode]');
-    for (var i = 0; i < modeBtns.length; i++) {
-      (function (btn) {
-        btn.addEventListener('click', function () {
+    // 手機觸控提示：點擊後聚焦輸入框
+    const mobileHint = document.getElementById('mobile-input-hint');
+    if (mobileHint) {
+      mobileHint.addEventListener('click', () => {
+        initAudio();
+        const inp = document.getElementById('zen-input');
+        if (inp) {
+          inp.focus();
+          inp.click();
+        }
+      });
+    }
+
+    // 模式選擇按鈕
+    const modeBtns = document.querySelectorAll('.mode-btn[data-mode]');
+    for (let i = 0; i < modeBtns.length; i++) {
+      ((btn) => {
+        btn.addEventListener('click', () => {
           selectMode(btn.getAttribute('data-mode'));
         });
       })(modeBtns[i]);
     }
 
     // 開始按鈕
-    var startBtn = document.getElementById('startBtn');
+    const startBtn = document.getElementById('startBtn');
     if (startBtn) {
       startBtn.addEventListener('click', startGame);
     }
 
     // 結束修行按鈕
-    var endBtn = document.getElementById('endBtn');
+    const endBtn = document.getElementById('endBtn');
     if (endBtn) {
       endBtn.addEventListener('click', endGame);
     }
 
     // 結果畫面的重新開始按鈕
-    var restartBtn = document.getElementById('restartBtn');
+    const restartBtn = document.getElementById('restartBtn');
     if (restartBtn) {
       restartBtn.addEventListener('click', startGame);
     }
 
     // 返回按鈕
-    var backBtn = document.getElementById('backBtn');
+    const backBtn = document.getElementById('backBtn');
     if (backBtn) {
       backBtn.addEventListener('click', showStart);
     }
 
     // 分享按鈕
-    var shareBtn = document.getElementById('shareBtn');
+    const shareBtn = document.getElementById('shareBtn');
     if (shareBtn) {
       shareBtn.addEventListener('click', shareScore);
     }
+
+    // 全域鍵盤事件（Escape 暫停用）
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && (currentGameState === GAME_STATE.PLAYING || currentGameState === GAME_STATE.PAUSED)) {
+        e.preventDefault();
+        togglePause();
+      }
+    });
   }
 
   if (document.readyState === 'loading') {

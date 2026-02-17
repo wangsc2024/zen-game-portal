@@ -1,14 +1,15 @@
 // ============================================================
-// 禪音節奏 - Zen Rhythm
+// 禪音節奏 - Zen Rhythm v2.0
 // A rhythm game where zen characters fall to the beat.
 // Tap/click/press keys in time to score points.
+// v2.0: 節拍視覺化、暫停修復、HP 自適應、效能優化
 // ============================================================
 
 'use strict';
 
 (() => {
 
-// ─── Constants ───────────────────────────────────────────────
+// --- Constants ---
 const ZEN_CHARS = [
   { ch: '空', meaning: '一切皆空，萬法無常' },
   { ch: '定', meaning: '心如止水，不動如山' },
@@ -29,27 +30,27 @@ const ZEN_CHARS = [
 ];
 
 // Hit zones (relative to canvas height)
-const PERFECT_ZONE = 0.03;  // ±3% from target line
-const GOOD_ZONE = 0.06;     // ±6%
-const OK_ZONE = 0.10;       // ±10%
+const PERFECT_ZONE = 0.03;
+const GOOD_ZONE = 0.06;
+const OK_ZONE = 0.10;
 
-const TARGET_LINE_Y = 0.82; // where the hit line sits
+const TARGET_LINE_Y = 0.82;
 
 // Scenes (unlock by combo)
 const SCENES = [
-  { name: '枯山水', bgFrom: '#0a0a12', bgTo: '#1a1a2e', particleColor: '#8888aa', threshold: 0 },
-  { name: '春芽', bgFrom: '#0f1a0f', bgTo: '#1a2e1a', particleColor: '#66cc88', threshold: 10 },
-  { name: '盛花', bgFrom: '#1a0f1a', bgTo: '#2e1a2e', particleColor: '#ff88cc', threshold: 25 },
-  { name: '極樂淨土', bgFrom: '#1a1a0f', bgTo: '#2e2e1a', particleColor: '#ffdd66', threshold: 50 },
+  { name: '枯山水', bgFrom: '#0a0a12', bgTo: '#1a1a2e', particleColor: '#8888aa', particleRGB: '136,136,170', threshold: 0 },
+  { name: '春芽', bgFrom: '#0f1a0f', bgTo: '#1a2e1a', particleColor: '#66cc88', particleRGB: '102,204,136', threshold: 10 },
+  { name: '盛花', bgFrom: '#1a0f1a', bgTo: '#2e1a2e', particleColor: '#ff88cc', particleRGB: '255,136,204', threshold: 25 },
+  { name: '極樂淨土', bgFrom: '#1a1a0f', bgTo: '#2e2e1a', particleColor: '#ffdd66', particleRGB: '255,221,102', threshold: 50 },
 ];
 
-// Audio frequencies for pentatonic scale (D minor pentatonic in different octaves)
+// Audio frequencies for pentatonic scale
 const PENTA_FREQS = [293.66, 349.23, 392.00, 440.00, 523.25, 587.33, 698.46, 783.99];
 
 const MAX_PARTICLES = 200;
 const PARTICLE_POOL_SIZE = 300;
 
-// ─── State ────────────────────────────────────────────────────
+// --- State ---
 const STATE = {
   LOADING: 'loading',
   MENU: 'menu',
@@ -68,49 +69,55 @@ let score = 0;
 let combo = 0;
 let maxCombo = 0;
 let bestScore = 0;
-let hp = 100;        // health/life
-let bpm = 80;        // starting BPM
-let beatInterval;     // ms between beats
+let hp = 100;
+let bpm = 80;
+let beatInterval;
 let lastBeatTime = 0;
 let gameTime = 0;
 let startTime = 0;
-let hitFeedback = null;     // { text, color, timer, x, y }
-let meaningDisplay = null;  // { text, timer }
+let hitFeedback = null;
+let meaningDisplay = null;
+let pausedAtTimestamp = 0; // track when we paused for proper resume
 
 // Falling notes
-let notes = [];       // { x, y, speed, char, meaning, lane, active, hit }
-let lanes = 4;        // number of lanes
+let notes = [];
+let lanes = 4;
 let laneWidth;
 
-// Particles (object pool)
-let particles = [];
+// Particles (object pool) - time-based lifecycle
 let particlePool = [];
 let activeParticleCount = 0;
 
 // Scene
 let currentScene = 0;
-let sceneLerp = 0;    // 0-1 transition
+let sceneLerp = 0;
 
-// Stats for game over
+// Stats
 let perfectCount = 0;
 let goodCount = 0;
 let okCount = 0;
 let missCount = 0;
 
 // Visual
-let ripples = [];     // { x, y, radius, maxRadius, alpha }
+let ripples = [];
+let rippleCount = 0;
+const MAX_RIPPLES = 30;
 let targetLineGlow = 0;
 let bgGradientOffset = 0;
 
-// Beat pulse visualization
-let beatPulse = 0;        // 0-1 intensity, triggered on each beat
-let beatPulseRings = [];  // { y, radius, alpha } expanding rings at target line
+// Beat pulse
+let beatPulse = 0;
+let beatPulseRings = [];
 
 // Screen shake
 let shakeX = 0;
 let shakeY = 0;
 let shakeIntensity = 0;
-let shakeDecay = 0.9;
+const shakeDecay = 0.9;
+
+// Beat indicator - visual metronome for rhythm feedback
+let beatIndicatorPhase = 0; // 0 to 1, cycles with each beat
+let lastBeatIndicatorTime = 0;
 
 // Combo milestones
 const COMBO_MILESTONES = [
@@ -120,9 +127,9 @@ const COMBO_MILESTONES = [
   { threshold: 75,  text: '禪悅法喜', quote: '法喜充滿' },
   { threshold: 100, text: '圓滿證悟', quote: '頓超直入' },
 ];
-let milestoneDisplay = null;  // { text, quote, timer, flash }
-let lastMilestoneCombo = 0;   // track which milestones triggered
-let screenFlash = 0;          // 0-1 full-screen flash
+let milestoneDisplay = null;
+let lastMilestoneCombo = 0;
+let screenFlash = 0;
 
 // Achievement system
 const ACHIEVEMENTS = [
@@ -137,26 +144,26 @@ const ACHIEVEMENTS = [
   { id: 'all_chars',       name: '法藏',     desc: '蒐集全部禪字', check: (s) => s.collectedTotal >= ZEN_CHARS.length },
   { id: 'no_miss',         name: '不動心',   desc: '單局零 MISS', check: (s) => s.gameOver && s.missCount === 0 && s.totalHits > 10 },
 ];
-let unlockedAchievements = {};   // persistent { id: true }
-let sessionAchievements = [];    // newly unlocked this session
-let achievementPopup = null;     // { name, desc, timer }
+let unlockedAchievements = {};
+let sessionAchievements = [];
+let achievementPopup = null;
 
-// Consecutive days tracking
-let playerProgress = null;  // { lastPlayDate, consecutiveDays, totalPlays }
+// Player progress
+let playerProgress = null;
 
-// Touch / input
-let touchLanes = {};  // track active touches per lane
+// Touch
+let touchLanes = {};
 
-// Collections unlocked
+// Collections
 let collectedChars = new Set();
-let allCollected = {};  // persistent
+let allCollected = {};
 
-// ─── Canvas Setup ──────────────────────────────────────────
+// --- Canvas Setup ---
 function initCanvas() {
   canvas = document.getElementById('game');
   ctx = canvas.getContext('2d');
   resize();
-  window.addEventListener('resize', resize);
+  window.addEventListener('resize', debouncedResize);
 }
 
 function resize() {
@@ -171,7 +178,14 @@ function resize() {
   laneWidth = W / lanes;
 }
 
-// ─── Audio ─────────────────────────────────────────────────
+// Debounced resize to avoid excessive reflows
+let resizeTimer = null;
+function debouncedResize() {
+  if (resizeTimer) clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(resize, 150);
+}
+
+// --- Audio ---
 function initAudio() {
   if (audioCtx) return;
   audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -202,7 +216,6 @@ function playNote(freq, duration, volume) {
 
 function playBowlSound() {
   if (!audioCtx) return;
-  // Singing bowl simulation - multiple harmonics with slow decay
   const baseFreq = 220;
   const harmonics = [1, 2.02, 3.01, 4.99];
   const volumes = [0.15, 0.08, 0.04, 0.02];
@@ -228,7 +241,6 @@ function playHitSound(quality) {
   const dur = quality === 'perfect' ? 0.8 : quality === 'good' ? 0.5 : 0.3;
   playNote(freq, dur, vol);
 
-  // Harmony note for perfect hits
   if (quality === 'perfect') {
     const harmIdx = (freqIdx + 2) % PENTA_FREQS.length;
     playNote(PENTA_FREQS[harmIdx], 0.6, 0.2);
@@ -263,27 +275,62 @@ function playBeatTick() {
   osc.stop(audioCtx.currentTime + 0.05);
 }
 
-// ─── Particle Pool ────────────────────────────────────────
+function playAchievementSound() {
+  if (!audioCtx) return;
+  const freqs = [523.25, 659.25, 783.99, 1046.50];
+  freqs.forEach((f, i) => {
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = f;
+    gain.gain.setValueAtTime(0, audioCtx.currentTime + i * 0.1);
+    gain.gain.linearRampToValueAtTime(0.15, audioCtx.currentTime + i * 0.1 + 0.05);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + i * 0.1 + 0.4);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start(audioCtx.currentTime + i * 0.1);
+    osc.stop(audioCtx.currentTime + i * 0.1 + 0.4);
+  });
+}
+
+function playMilestoneSound() {
+  if (!audioCtx) return;
+  const chordFreqs = [261.63, 329.63, 392.00, 523.25];
+  chordFreqs.forEach((f) => {
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = f;
+    gain.gain.setValueAtTime(0.12, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 1.5);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start();
+    osc.stop(audioCtx.currentTime + 1.5);
+  });
+}
+
+// --- Particle Pool (time-based) ---
 function initParticlePool() {
   for (let i = 0; i < PARTICLE_POOL_SIZE; i++) {
     particlePool.push({
       x: 0, y: 0, vx: 0, vy: 0,
       life: 0, maxLife: 0,
       size: 0, color: '', active: false,
-      type: 'circle', // circle, char, ring
+      type: 'circle',
       char: '',
     });
   }
 }
 
-function spawnParticle(x, y, vx, vy, life, size, color, type, char) {
+function spawnParticle(x, y, vx, vy, lifeSec, size, color, type, char) {
   if (activeParticleCount >= MAX_PARTICLES) return;
 
   for (let i = 0; i < particlePool.length; i++) {
     const p = particlePool[i];
     if (!p.active) {
       p.x = x; p.y = y; p.vx = vx; p.vy = vy;
-      p.life = life; p.maxLife = life;
+      p.life = lifeSec; p.maxLife = lifeSec;
       p.size = size; p.color = color;
       p.active = true; p.type = type || 'circle';
       p.char = char || '';
@@ -301,39 +348,38 @@ function spawnHitParticles(x, y, quality) {
 
   for (let i = 0; i < count; i++) {
     const angle = (Math.PI * 2 * i) / count + Math.random() * 0.3;
-    const speed = 1.5 + Math.random() * 3;
-    const life = 40 + Math.random() * 30;
+    const speed = 90 + Math.random() * 180;
+    const lifeSec = 0.5 + Math.random() * 0.4;
     spawnParticle(
       x, y,
-      Math.cos(angle) * speed, Math.sin(angle) * speed - 1,
-      life, 2 + Math.random() * 3,
+      Math.cos(angle) * speed, Math.sin(angle) * speed - 60,
+      lifeSec, 2 + Math.random() * 3,
       baseColor, 'circle'
     );
   }
 
-  // Ring effect for perfect
   if (quality === 'perfect') {
-    spawnParticle(x, y, 0, 0, 30, 5, '#ffd700', 'ring');
+    spawnParticle(x, y, 0, 0, 0.5, 5, '#ffd700', 'ring');
   }
 }
 
-function updateParticles() {
+function updateParticles(dtSec) {
   activeParticleCount = 0;
   for (let i = 0; i < particlePool.length; i++) {
     const p = particlePool[i];
     if (!p.active) continue;
 
-    p.life--;
+    p.life -= dtSec;
     if (p.life <= 0) {
       p.active = false;
       continue;
     }
 
     activeParticleCount++;
-    p.x += p.vx;
-    p.y += p.vy;
-    p.vy += 0.03; // gravity
-    p.vx *= 0.98;
+    p.x += p.vx * dtSec;
+    p.y += p.vy * dtSec;
+    p.vy += 120 * dtSec; // gravity (pixels/sec^2)
+    p.vx *= (1 - 1.2 * dtSec); // drag
   }
 }
 
@@ -367,9 +413,60 @@ function drawParticles() {
   ctx.globalAlpha = 1;
 }
 
-// ─── Notes (falling characters) ──────────────────────────
+// --- Ripples (swap-and-pop for performance) ---
+function initRipples() {
+  ripples = [];
+  rippleCount = 0;
+  for (let i = 0; i < MAX_RIPPLES; i++) {
+    ripples.push({ x: 0, y: 0, radius: 0, maxRadius: 0, alpha: 0, active: false });
+  }
+}
+
+function spawnRipple(x, y, maxRadius) {
+  for (let i = 0; i < MAX_RIPPLES; i++) {
+    if (!ripples[i].active) {
+      ripples[i].x = x;
+      ripples[i].y = y;
+      ripples[i].radius = 5;
+      ripples[i].maxRadius = maxRadius;
+      ripples[i].alpha = 0.8;
+      ripples[i].active = true;
+      rippleCount++;
+      return;
+    }
+  }
+}
+
+function updateRipples(dtSec) {
+  for (let i = 0; i < MAX_RIPPLES; i++) {
+    const r = ripples[i];
+    if (!r.active) continue;
+
+    r.radius += 120 * dtSec;
+    r.alpha -= 1.5 * dtSec;
+
+    if (r.alpha <= 0 || r.radius >= r.maxRadius) {
+      r.active = false;
+      rippleCount--;
+    }
+  }
+}
+
+function drawRipples() {
+  for (let i = 0; i < MAX_RIPPLES; i++) {
+    const r = ripples[i];
+    if (!r.active) continue;
+
+    ctx.strokeStyle = `rgba(255,215,0,${r.alpha})`;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(r.x, r.y, r.radius, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+}
+
+// --- Notes (falling characters) ---
 function spawnNote() {
-  // Avoid spawning in lanes that already have a note near the top
   let lane = Math.floor(Math.random() * lanes);
   const minGap = H * 0.15;
   let attempts = 0;
@@ -379,21 +476,25 @@ function spawnNote() {
     lane = (lane + 1) % lanes;
     attempts++;
   }
-  if (attempts >= lanes) return; // All lanes congested, skip
+  if (attempts >= lanes) return;
 
   const zenIdx = Math.floor(Math.random() * ZEN_CHARS.length);
   const zen = ZEN_CHARS[zenIdx];
 
-  // Speed increases with time
+  // Speed: pixels per second, consistent regardless of frame rate
+  // Base speed: travel from top (-40) to target line in ~1.2 beats
+  const targetY = H * TARGET_LINE_Y;
+  const travelDist = targetY + 40; // from -40 to target
   const elapsed = (performance.now() - startTime) / 1000;
-  const speedMult = 1 + elapsed / 180; // 3 minutes to double speed
-  const baseSpeed = H / (beatInterval / 16.67 * 1.2); // reach target line in ~1.2 beats
-  const speed = baseSpeed * speedMult * (0.9 + Math.random() * 0.2);
+  const speedMult = 1 + elapsed / 180;
+  const travelTimeMs = beatInterval * 1.2;
+  const baseSpeed = travelDist / (travelTimeMs / 1000);
+  const speed = baseSpeed * speedMult * (0.95 + Math.random() * 0.1);
 
   notes.push({
     x: lane * laneWidth + laneWidth / 2,
     y: -40,
-    speed: Math.max(speed, 1.5),
+    speed: Math.max(speed, H * 0.15), // minimum speed prevents too slow notes
     char: zen.ch,
     meaning: zen.meaning,
     lane: lane,
@@ -403,30 +504,35 @@ function spawnNote() {
   });
 }
 
-function updateNotes(dt) {
-  // Update all notes
+function updateNotes(dtSec) {
+  const targetY = H * TARGET_LINE_Y;
+
   for (let i = 0; i < notes.length; i++) {
     const n = notes[i];
     if (!n.active) continue;
 
-    n.y += n.speed * (dt / 16.67);
+    // Time-based movement (consistent across frame rates)
+    n.y += n.speed * dtSec;
 
-    // Missed - passed below target line + OK zone
+    // Missed
     if (n.y > H * (TARGET_LINE_Y + OK_ZONE + 0.05) && !n.hit) {
       n.active = false;
       missCount++;
       combo = 0;
       lastMilestoneCombo = 0;
-      hp = Math.max(0, hp - 8);
+
+      // Adaptive HP loss: less punishing at higher BPM
+      const hpLoss = bpm > 160 ? 5 : bpm > 120 ? 6 : 8;
+      hp = Math.max(0, hp - hpLoss);
+
       playMissSound();
       triggerShake(5);
-      hitFeedback = { text: 'MISS', color: '#ff4444', timer: 40, x: n.x, y: H * TARGET_LINE_Y };
+      hitFeedback = { text: 'MISS', color: '#ff4444', timer: 0.6, x: n.x, y: targetY };
       if (hp <= 0) {
         endGame();
       }
     }
 
-    // Remove if off screen
     if (n.y > H + 50) {
       n.active = false;
     }
@@ -449,14 +555,11 @@ function drawNotes() {
   for (const n of notes) {
     if (!n.active || n.hit) continue;
 
-    // Glow effect as note approaches target line
     const distToTarget = Math.abs(n.y - targetY) / H;
     const glowIntensity = Math.max(0, 1 - distToTarget * 5);
 
-    // Draw glow
     if (glowIntensity > 0) {
       const gradient = ctx.createRadialGradient(n.x, n.y, 0, n.x, n.y, 40);
-      const scene = SCENES[currentScene];
       gradient.addColorStop(0, `rgba(255,215,0,${glowIntensity * 0.3})`);
       gradient.addColorStop(1, 'rgba(255,215,0,0)');
       ctx.fillStyle = gradient;
@@ -465,14 +568,12 @@ function drawNotes() {
       ctx.fill();
     }
 
-    // Draw character
     const size = 32 + glowIntensity * 8;
     ctx.fillStyle = '#fff';
     ctx.font = `bold ${size}px "Noto Serif TC", serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
 
-    // Shadow
     ctx.shadowColor = SCENES[currentScene].particleColor;
     ctx.shadowBlur = 10 + glowIntensity * 15;
     ctx.fillText(n.char, n.x, n.y);
@@ -480,7 +581,7 @@ function drawNotes() {
   }
 }
 
-// ─── Input Handling ───────────────────────────────────────
+// --- Input Handling ---
 function getLaneFromX(x) {
   return Math.floor(x / laneWidth);
 }
@@ -517,46 +618,38 @@ function tryHitLane(lane, inputX) {
     score += 30;
     okCount++;
   } else {
-    return; // Too far
+    return;
   }
 
-  // Mark as hit
   closestNote.hit = true;
   closestNote.active = false;
   combo++;
   maxCombo = Math.max(maxCombo, combo);
   hp = Math.min(100, hp + (quality === 'perfect' ? 3 : 1));
 
-  // Collect character
   collectedChars.add(closestNote.char);
 
-  // Visual feedback
   const feedbackText = quality === 'perfect' ? 'PERFECT!' :
                        quality === 'good' ? 'GOOD' : 'OK';
   const feedbackColor = quality === 'perfect' ? '#ffd700' :
                         quality === 'good' ? '#88ccff' : '#aaaaaa';
-  hitFeedback = { text: feedbackText, color: feedbackColor, timer: 35, x: closestNote.x, y: targetY - 30 };
+  hitFeedback = { text: feedbackText, color: feedbackColor, timer: 0.6, x: closestNote.x, y: targetY - 30 };
 
-  // Show meaning for perfect hits
   if (quality === 'perfect') {
-    meaningDisplay = { text: closestNote.meaning, timer: 80 };
+    meaningDisplay = { text: closestNote.meaning, timer: 1.3 };
   }
 
-  // Effects
   playHitSound(quality);
   spawnHitParticles(closestNote.x, targetY, quality);
-  ripples.push({ x: closestNote.x, y: targetY, radius: 5, maxRadius: 60, alpha: 0.8 });
+  spawnRipple(closestNote.x, targetY, 60);
   targetLineGlow = 1;
 
-  // Screen shake on perfect
   if (quality === 'perfect') {
     triggerShake(3);
   }
 
-  // Spawn floating character particle
-  spawnParticle(closestNote.x, targetY, 0, -1.5, 50, 28, feedbackColor, 'char', closestNote.char);
+  spawnParticle(closestNote.x, targetY, 0, -90, 0.8, 28, feedbackColor, 'char', closestNote.char);
 
-  // Update scene based on combo
   updateScene();
   checkComboMilestone();
   checkAchievements();
@@ -576,7 +669,6 @@ function handlePointerDown(x, y) {
     return;
   }
   if (state === STATE.PLAYING) {
-    // Check pause button first
     if (isPauseButtonHit(x, y)) {
       pauseGame();
       return;
@@ -587,12 +679,10 @@ function handlePointerDown(x, y) {
 }
 
 function initInput() {
-  // Mouse
   canvas.addEventListener('mousedown', (e) => {
     handlePointerDown(e.clientX, e.clientY);
   });
 
-  // Touch
   canvas.addEventListener('touchstart', (e) => {
     e.preventDefault();
     for (const touch of e.changedTouches) {
@@ -600,7 +690,6 @@ function initInput() {
     }
   }, { passive: false });
 
-  // Keyboard
   window.addEventListener('keydown', (e) => {
     if (e.repeat) return;
 
@@ -631,7 +720,6 @@ function initInput() {
 
     if (state !== STATE.PLAYING) return;
 
-    // Lane keys: D F J K (4 lanes)
     const keyMap = { 'd': 0, 'f': 1, 'j': 2, 'k': 3 };
     const lane = keyMap[e.key.toLowerCase()];
     if (lane !== undefined) {
@@ -640,7 +728,7 @@ function initInput() {
   });
 }
 
-// ─── Scene Management ──────────────────────────────────────
+// --- Scene Management ---
 function updateScene() {
   let targetScene = 0;
   for (let i = SCENES.length - 1; i >= 0; i--) {
@@ -655,7 +743,7 @@ function updateScene() {
   }
 }
 
-// ─── Game State ────────────────────────────────────────────
+// --- Game State ---
 function startGame() {
   initAudio();
   state = STATE.PLAYING;
@@ -675,12 +763,12 @@ function startGame() {
   collectedChars = new Set();
   hitFeedback = null;
   meaningDisplay = null;
-  ripples = [];
+  initRipples();
   startTime = performance.now();
   lastBeatTime = startTime;
   gameTime = 0;
+  pausedAtTimestamp = 0;
 
-  // Reset new state
   beatPulse = 0;
   shakeX = 0;
   shakeY = 0;
@@ -691,13 +779,13 @@ function startGame() {
   achievementPopup = null;
   sessionAchievements = [];
 
-  // Reset particles
+  beatIndicatorPhase = 0;
+  lastBeatIndicatorTime = startTime;
+
   for (const p of particlePool) p.active = false;
   activeParticleCount = 0;
 
-  // Update consecutive days
   updateConsecutiveDays();
-
   playBowlSound();
 }
 
@@ -708,29 +796,34 @@ function endGame() {
     bestScore = score;
     saveBestScore();
   }
-  // Save collected characters
   for (const ch of collectedChars) {
     allCollected[ch] = true;
   }
   saveCollection();
-  // Final achievement check (for game-over-dependent achievements)
   checkAchievements();
 }
 
 function pauseGame() {
   state = STATE.PAUSED;
+  pausedAtTimestamp = performance.now();
 }
 
 function resumeGame() {
   state = STATE.PLAYING;
-  lastBeatTime = performance.now();
+  // Fix: adjust timing references by the pause duration to prevent dt spike
+  const pauseDuration = performance.now() - pausedAtTimestamp;
+  lastBeatTime += pauseDuration;
+  startTime += pauseDuration;
+  lastBeatIndicatorTime += pauseDuration;
+  // Reset lastTime so the game loop computes a clean dt on resume
+  lastTime = performance.now();
 }
 
 function goToMenu() {
   state = STATE.MENU;
 }
 
-// ─── Persistence ───────────────────────────────────────────
+// --- Persistence ---
 function loadBestScore() {
   try {
     bestScore = parseInt(localStorage.getItem('zenrhythm_best') || '0', 10);
@@ -807,33 +900,14 @@ function checkAchievements() {
     if (ach.check(stats)) {
       unlockedAchievements[ach.id] = true;
       sessionAchievements.push(ach);
-      achievementPopup = { name: ach.name, desc: ach.desc, timer: 120 };
+      achievementPopup = { name: ach.name, desc: ach.desc, timer: 2.0 };
       saveAchievements();
       playAchievementSound();
     }
   }
 }
 
-function playAchievementSound() {
-  if (!audioCtx) return;
-  // Ascending arpeggio for achievement unlock
-  const freqs = [523.25, 659.25, 783.99, 1046.50];
-  freqs.forEach((f, i) => {
-    const osc = audioCtx.createOscillator();
-    const gain = audioCtx.createGain();
-    osc.type = 'sine';
-    osc.frequency.value = f;
-    gain.gain.setValueAtTime(0, audioCtx.currentTime + i * 0.1);
-    gain.gain.linearRampToValueAtTime(0.15, audioCtx.currentTime + i * 0.1 + 0.05);
-    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + i * 0.1 + 0.4);
-    osc.connect(gain);
-    gain.connect(audioCtx.destination);
-    osc.start(audioCtx.currentTime + i * 0.1);
-    osc.stop(audioCtx.currentTime + i * 0.1 + 0.4);
-  });
-}
-
-// ─── Screen Shake ─────────────────────────────────────────
+// --- Screen Shake ---
 function triggerShake(intensity) {
   shakeIntensity = intensity;
 }
@@ -850,23 +924,22 @@ function updateShake() {
   }
 }
 
-// ─── Combo Milestones ─────────────────────────────────────
+// --- Combo Milestones ---
 function checkComboMilestone() {
   for (const m of COMBO_MILESTONES) {
     if (combo >= m.threshold && lastMilestoneCombo < m.threshold) {
       lastMilestoneCombo = m.threshold;
-      milestoneDisplay = { text: m.text, quote: m.quote, timer: 100, flash: 1 };
+      milestoneDisplay = { text: m.text, quote: m.quote, timer: 1.6 };
       screenFlash = 1;
       triggerShake(8);
       playMilestoneSound();
-      // Burst of particles from center
       for (let i = 0; i < 30; i++) {
         const angle = (Math.PI * 2 * i) / 30;
-        const speed = 3 + Math.random() * 4;
+        const speed = 180 + Math.random() * 240;
         spawnParticle(
           W / 2, H / 2,
           Math.cos(angle) * speed, Math.sin(angle) * speed,
-          60 + Math.random() * 30, 3 + Math.random() * 3,
+          0.8 + Math.random() * 0.4, 3 + Math.random() * 3,
           '#ffd700', 'circle'
         );
       }
@@ -875,29 +948,10 @@ function checkComboMilestone() {
   }
 }
 
-function playMilestoneSound() {
-  if (!audioCtx) return;
-  // Grand chord for milestone
-  const chordFreqs = [261.63, 329.63, 392.00, 523.25];
-  chordFreqs.forEach((f) => {
-    const osc = audioCtx.createOscillator();
-    const gain = audioCtx.createGain();
-    osc.type = 'sine';
-    osc.frequency.value = f;
-    gain.gain.setValueAtTime(0.12, audioCtx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 1.5);
-    osc.connect(gain);
-    gain.connect(audioCtx.destination);
-    osc.start();
-    osc.stop(audioCtx.currentTime + 1.5);
-  });
-}
-
-// ─── Drawing ───────────────────────────────────────────────
+// --- Drawing ---
 function drawBackground() {
   const scene = SCENES[currentScene];
 
-  // Animated gradient background
   bgGradientOffset += 0.001;
   const grad = ctx.createLinearGradient(0, 0, 0, H);
   grad.addColorStop(0, scene.bgFrom);
@@ -906,7 +960,7 @@ function drawBackground() {
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, W, H);
 
-  // Subtle pattern - floating dots
+  // Floating dots
   ctx.globalAlpha = 0.05;
   const time = performance.now() / 3000;
   for (let i = 0; i < 30; i++) {
@@ -919,12 +973,12 @@ function drawBackground() {
   }
   ctx.globalAlpha = 1;
 
-  // Beat pulse - subtle edge vignette that pulses with the beat
+  // Beat pulse vignette
   if (beatPulse > 0.01) {
     const pulseAlpha = beatPulse * 0.15;
     const edgeGrad = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.3, W / 2, H / 2, Math.max(W, H) * 0.7);
     edgeGrad.addColorStop(0, 'rgba(0,0,0,0)');
-    edgeGrad.addColorStop(1, `rgba(${scene.particleColor === '#ffd700' || scene.particleColor === '#ffdd66' ? '255,215,0' : scene.particleColor === '#ff88cc' ? '255,136,204' : scene.particleColor === '#66cc88' ? '102,204,136' : '136,136,170'},${pulseAlpha})`);
+    edgeGrad.addColorStop(1, `rgba(${scene.particleRGB},${pulseAlpha})`);
     ctx.fillStyle = edgeGrad;
     ctx.fillRect(0, 0, W, H);
   }
@@ -940,7 +994,6 @@ function drawBackground() {
 }
 
 function drawLanes() {
-  // Lane dividers
   ctx.strokeStyle = 'rgba(255,255,255,0.05)';
   ctx.lineWidth = 1;
   for (let i = 1; i < lanes; i++) {
@@ -951,7 +1004,6 @@ function drawLanes() {
     ctx.stroke();
   }
 
-  // Lane key labels at bottom
   const keys = ['D', 'F', 'J', 'K'];
   ctx.fillStyle = 'rgba(255,255,255,0.15)';
   ctx.font = '16px monospace';
@@ -967,9 +1019,9 @@ function drawTargetLine() {
   // Glow effect
   if (targetLineGlow > 0) {
     const glowGrad = ctx.createLinearGradient(0, y - 20, 0, y + 20);
-    glowGrad.addColorStop(0, `rgba(255,215,0,0)`);
+    glowGrad.addColorStop(0, 'rgba(255,215,0,0)');
     glowGrad.addColorStop(0.5, `rgba(255,215,0,${targetLineGlow * 0.3})`);
-    glowGrad.addColorStop(1, `rgba(255,215,0,0)`);
+    glowGrad.addColorStop(1, 'rgba(255,215,0,0)');
     ctx.fillStyle = glowGrad;
     ctx.fillRect(0, y - 20, W, 40);
     targetLineGlow *= 0.92;
@@ -991,7 +1043,7 @@ function drawTargetLine() {
   ctx.fillStyle = 'rgba(136,204,255,0.02)';
   ctx.fillRect(0, y - H * GOOD_ZONE, W, H * GOOD_ZONE * 2);
 
-  // Beat pulse rings expanding from target line
+  // Beat pulse rings
   if (beatPulse > 0.01) {
     for (let i = 0; i < lanes; i++) {
       const cx = i * laneWidth + laneWidth / 2;
@@ -1007,22 +1059,39 @@ function drawTargetLine() {
   }
 }
 
-function drawRipples() {
-  for (let i = ripples.length - 1; i >= 0; i--) {
-    const r = ripples[i];
-    r.radius += 2;
-    r.alpha -= 0.025;
+// --- Beat Indicator (visual metronome) ---
+function drawBeatIndicator() {
+  const y = H * TARGET_LINE_Y;
+  const indicatorY = y + 28;
 
-    if (r.alpha <= 0) {
-      ripples.splice(i, 1);
-      continue;
-    }
+  // Progress bar showing time until next beat
+  const phase = beatIndicatorPhase;
+  const barW = W * 0.4;
+  const barH = 4;
+  const barX = (W - barW) / 2;
 
-    ctx.strokeStyle = `rgba(255,215,0,${r.alpha})`;
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.arc(r.x, r.y, r.radius, 0, Math.PI * 2);
-    ctx.stroke();
+  // Background
+  ctx.fillStyle = 'rgba(255,255,255,0.06)';
+  ctx.fillRect(barX, indicatorY, barW, barH);
+
+  // Progress fill (sweeps left to right between beats)
+  const scene = SCENES[currentScene];
+  const fillAlpha = 0.3 + phase * 0.3;
+  ctx.fillStyle = `rgba(${scene.particleRGB},${fillAlpha})`;
+  ctx.fillRect(barX, indicatorY, barW * phase, barH);
+
+  // Beat dot (pulses at beat moment)
+  const dotSize = 3 + beatPulse * 4;
+  ctx.fillStyle = `rgba(255,215,0,${0.3 + beatPulse * 0.7})`;
+  ctx.beginPath();
+  ctx.arc(barX + barW * phase, indicatorY + barH / 2, dotSize, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Four tick marks at quarter intervals
+  ctx.fillStyle = 'rgba(255,255,255,0.15)';
+  for (let q = 0; q <= 4; q++) {
+    const tickX = barX + (barW * q) / 4;
+    ctx.fillRect(tickX - 0.5, indicatorY - 2, 1, barH + 4);
   }
 }
 
@@ -1031,7 +1100,7 @@ function drawHUD() {
   ctx.fillStyle = '#fff';
   ctx.font = 'bold 24px "Noto Serif TC", serif';
   ctx.textAlign = 'left';
-  ctx.fillText(`${Math.floor(score)}`, 20, 40);
+  ctx.fillText('' + Math.floor(score), 20, 40);
 
   // Combo
   if (combo > 1) {
@@ -1041,7 +1110,7 @@ function drawHUD() {
     ctx.fillStyle = currentScene >= 3 ? '#ffd700' :
                     currentScene >= 2 ? '#ff88cc' :
                     currentScene >= 1 ? '#66cc88' : '#8888aa';
-    ctx.fillText(`${combo} 連`, W / 2, 45);
+    ctx.fillText(combo + ' 連', W / 2, 45);
   }
 
   // Scene name
@@ -1067,25 +1136,23 @@ function drawHUD() {
   ctx.font = '12px monospace';
   ctx.fillStyle = 'rgba(255,255,255,0.3)';
   ctx.textAlign = 'right';
-  ctx.fillText(`${Math.floor(bpm)} BPM`, W - 20, hpY + hpBarH + 16);
+  ctx.fillText(Math.floor(bpm) + ' BPM', W - 20, hpY + hpBarH + 16);
 
-  // Hit feedback
+  // Hit feedback (time-based)
   if (hitFeedback && hitFeedback.timer > 0) {
-    hitFeedback.timer--;
-    const alpha = hitFeedback.timer / 35;
+    const alpha = hitFeedback.timer / 0.6;
     const yOff = (1 - alpha) * 20;
     ctx.globalAlpha = alpha;
-    ctx.font = `bold 28px "Noto Serif TC", serif`;
+    ctx.font = 'bold 28px "Noto Serif TC", serif';
     ctx.textAlign = 'center';
     ctx.fillStyle = hitFeedback.color;
     ctx.fillText(hitFeedback.text, hitFeedback.x, hitFeedback.y - yOff);
     ctx.globalAlpha = 1;
   }
 
-  // Meaning display
+  // Meaning display (time-based)
   if (meaningDisplay && meaningDisplay.timer > 0) {
-    meaningDisplay.timer--;
-    const alpha = Math.min(1, meaningDisplay.timer / 30);
+    const alpha = Math.min(1, meaningDisplay.timer / 0.5);
     ctx.globalAlpha = alpha;
     ctx.font = '18px "Noto Serif TC", serif';
     ctx.textAlign = 'center';
@@ -1094,12 +1161,11 @@ function drawHUD() {
     ctx.globalAlpha = 1;
   }
 
-  // Milestone display (center screen, large text)
+  // Milestone display (time-based)
   if (milestoneDisplay && milestoneDisplay.timer > 0) {
-    milestoneDisplay.timer--;
     const mt = milestoneDisplay.timer;
-    const fadeIn = Math.min(1, (100 - mt) / 15);
-    const fadeOut = Math.min(1, mt / 20);
+    const fadeIn = Math.min(1, (1.6 - mt) / 0.25);
+    const fadeOut = Math.min(1, mt / 0.3);
     const alpha = Math.min(fadeIn, fadeOut);
     const scale = 1 + (1 - fadeIn) * 0.3;
 
@@ -1108,7 +1174,6 @@ function drawHUD() {
     ctx.translate(W / 2, H * 0.4);
     ctx.scale(scale, scale);
 
-    // Milestone name
     ctx.font = 'bold 42px "Noto Serif TC", serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
@@ -1118,7 +1183,6 @@ function drawHUD() {
     ctx.fillText(milestoneDisplay.text, 0, 0);
     ctx.shadowBlur = 0;
 
-    // Quote
     ctx.font = '20px "Noto Serif TC", serif';
     ctx.fillStyle = '#fff';
     ctx.fillText(milestoneDisplay.quote, 0, 40);
@@ -1126,12 +1190,11 @@ function drawHUD() {
     ctx.restore();
   }
 
-  // Achievement popup (top-center)
+  // Achievement popup (time-based)
   if (achievementPopup && achievementPopup.timer > 0) {
-    achievementPopup.timer--;
     const at = achievementPopup.timer;
-    const slideIn = Math.min(1, (120 - at) / 20);
-    const fadeOut = Math.min(1, at / 15);
+    const slideIn = Math.min(1, (2.0 - at) / 0.3);
+    const fadeOut = Math.min(1, at / 0.25);
     const alpha = Math.min(slideIn, fadeOut);
     const yPos = 80 + (1 - slideIn) * -40;
 
@@ -1139,7 +1202,6 @@ function drawHUD() {
     const boxW = 220, boxH = 50;
     const boxX = W / 2 - boxW / 2;
 
-    // Background (rounded rect via arc)
     ctx.fillStyle = 'rgba(255,215,0,0.15)';
     ctx.strokeStyle = 'rgba(255,215,0,0.6)';
     ctx.lineWidth = 1;
@@ -1158,11 +1220,10 @@ function drawHUD() {
     ctx.fill();
     ctx.stroke();
 
-    // Text
     ctx.font = 'bold 18px "Noto Serif TC", serif';
     ctx.textAlign = 'center';
     ctx.fillStyle = '#ffd700';
-    ctx.fillText(`${achievementPopup.name}`, W / 2, yPos - 5);
+    ctx.fillText(achievementPopup.name, W / 2, yPos - 5);
     ctx.font = '13px "Noto Serif TC", serif';
     ctx.fillStyle = '#ccc';
     ctx.fillText(achievementPopup.desc, W / 2, yPos + 15);
@@ -1170,10 +1231,25 @@ function drawHUD() {
   }
 }
 
+function drawLoadingScreen() {
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, '#0a0a12');
+  grad.addColorStop(1, '#1a1a2e');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.fillStyle = '#8888aa';
+  ctx.font = '18px "Noto Serif TC", serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  const dots = '.'.repeat(Math.floor((performance.now() / 400) % 4));
+  ctx.fillText('載入中' + dots, W / 2, H / 2);
+}
+
 function drawMenu() {
   drawBackground();
 
-  // Title
   ctx.fillStyle = '#fff';
   ctx.font = 'bold 52px "Noto Serif TC", serif';
   ctx.textAlign = 'center';
@@ -1183,12 +1259,11 @@ function drawMenu() {
   ctx.fillText('禪音節奏', W / 2, H * 0.28);
   ctx.shadowBlur = 0;
 
-  // Subtitle
   ctx.font = '18px "Noto Serif TC", serif';
   ctx.fillStyle = '#8888aa';
   ctx.fillText('Zen Rhythm', W / 2, H * 0.35);
 
-  // Floating zen characters (decorative)
+  // Floating zen characters
   const time = performance.now() / 2000;
   ctx.globalAlpha = 0.15;
   ctx.font = '48px "Noto Serif TC", serif';
@@ -1200,7 +1275,6 @@ function drawMenu() {
   }
   ctx.globalAlpha = 1;
 
-  // Instructions
   ctx.font = '16px "Noto Serif TC", serif';
   ctx.fillStyle = '#aaa';
   ctx.fillText('禪字從天而降，在正確時機擊中它們', W / 2, H * 0.68);
@@ -1227,40 +1301,35 @@ function drawMenu() {
   ctx.fillStyle = '#ffd700';
   ctx.fillText('開始修行', W / 2, H * 0.82);
 
-  // Consecutive days (top area)
   if (playerProgress && playerProgress.consecutiveDays > 0) {
     ctx.font = '15px "Noto Serif TC", serif';
     ctx.fillStyle = '#8888aa';
-    const dayText = playerProgress.consecutiveDays >= 7 ? `連續修行第 ${playerProgress.consecutiveDays} 天` :
-                    playerProgress.consecutiveDays > 1 ? `連續修行第 ${playerProgress.consecutiveDays} 天` :
-                    '今日修行';
+    const dayText = playerProgress.consecutiveDays > 1
+      ? '連續修行第 ' + playerProgress.consecutiveDays + ' 天'
+      : '今日修行';
     ctx.fillText(dayText, W / 2, H * 0.42);
   }
 
-  // Best score & stats
   const infoY = H * 0.88;
   ctx.font = '14px "Noto Serif TC", serif';
   ctx.fillStyle = '#666';
   if (bestScore > 0) {
-    ctx.fillText(`最高分：${bestScore}`, W / 2, infoY);
+    ctx.fillText('最高分：' + bestScore, W / 2, infoY);
   }
 
-  // Collection
   const totalChars = ZEN_CHARS.length;
   const collected = Object.keys(allCollected).length;
   if (collected > 0) {
-    ctx.fillText(`禪字蒐集：${collected} / ${totalChars}`, W / 2, infoY + 20);
+    ctx.fillText('禪字蒐集：' + collected + ' / ' + totalChars, W / 2, infoY + 20);
   }
 
-  // Achievements
   const achCount = Object.keys(unlockedAchievements).length;
   if (achCount > 0) {
-    ctx.fillText(`成就：${achCount} / ${ACHIEVEMENTS.length}`, W / 2, infoY + 40);
+    ctx.fillText('成就：' + achCount + ' / ' + ACHIEVEMENTS.length, W / 2, infoY + 40);
   }
 }
 
 function drawPlayingScene() {
-  // Apply screen shake transform
   if (shakeIntensity > 0.1) {
     ctx.save();
     ctx.translate(shakeX, shakeY);
@@ -1269,20 +1338,19 @@ function drawPlayingScene() {
   drawBackground();
   drawLanes();
   drawTargetLine();
+  drawBeatIndicator();
   drawNotes();
   drawRipples();
   drawParticles();
   drawHUD();
   drawPauseButton();
 
-  // Restore shake transform
   if (shakeIntensity > 0.1) {
     ctx.restore();
   }
 }
 
 function drawPauseButton() {
-  // Touch-friendly pause button (top-left)
   const btnSize = 36;
   const btnX = 20;
   const btnY = 60;
@@ -1292,7 +1360,6 @@ function drawPauseButton() {
   ctx.arc(btnX + btnSize / 2, btnY + btnSize / 2, btnSize / 2, 0, Math.PI * 2);
   ctx.fill();
 
-  // Pause icon (two bars)
   ctx.fillStyle = 'rgba(255,255,255,0.5)';
   ctx.fillRect(btnX + 12, btnY + 10, 4, 16);
   ctx.fillRect(btnX + 20, btnY + 10, 4, 16);
@@ -1304,14 +1371,12 @@ function isPauseButtonHit(x, y) {
 }
 
 function drawPaused() {
-  // Draw game scene underneath
   drawBackground();
   drawLanes();
   drawTargetLine();
   drawNotes();
   drawHUD();
 
-  // Dim overlay
   ctx.fillStyle = 'rgba(0,0,0,0.6)';
   ctx.fillRect(0, 0, W, H);
 
@@ -1329,14 +1394,12 @@ function drawPaused() {
 function drawGameOver() {
   drawBackground();
 
-  // Title
   ctx.fillStyle = '#fff';
   ctx.font = 'bold 40px "Noto Serif TC", serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText('修行結束', W / 2, H * 0.15);
 
-  // Score
   ctx.font = 'bold 56px "Noto Serif TC", serif';
   ctx.fillStyle = '#ffd700';
   ctx.fillText(Math.floor(score), W / 2, H * 0.28);
@@ -1347,7 +1410,6 @@ function drawGameOver() {
     ctx.fillText('新紀錄！', W / 2, H * 0.34);
   }
 
-  // Stats
   const stats = [
     { label: '最高連擊', value: maxCombo },
     { label: 'PERFECT', value: perfectCount, color: '#ffd700' },
@@ -1368,17 +1430,15 @@ function drawGameOver() {
     ctx.fillText(String(s.value), W / 2 + 10, y);
   });
 
-  // Accuracy
   const total = perfectCount + goodCount + okCount + missCount;
   if (total > 0) {
     const accuracy = ((perfectCount + goodCount + okCount) / total * 100).toFixed(1);
     ctx.font = '16px "Noto Serif TC", serif';
     ctx.textAlign = 'center';
     ctx.fillStyle = '#aaa';
-    ctx.fillText(`準確率 ${accuracy}%`, W / 2, startY + stats.length * 32 + 10);
+    ctx.fillText('準確率 ' + accuracy + '%', W / 2, startY + stats.length * 32 + 10);
   }
 
-  // Collected characters this round
   if (collectedChars.size > 0) {
     const charsY = H * 0.72;
     ctx.font = '14px "Noto Serif TC", serif';
@@ -1395,7 +1455,6 @@ function drawGameOver() {
     });
   }
 
-  // Session achievements
   if (sessionAchievements.length > 0) {
     const achY = H * 0.83;
     ctx.font = '14px "Noto Serif TC", serif';
@@ -1405,11 +1464,10 @@ function drawGameOver() {
     ctx.font = 'bold 16px "Noto Serif TC", serif';
     ctx.fillStyle = '#ffd700';
     sessionAchievements.forEach((ach, i) => {
-      ctx.fillText(`${ach.name} — ${ach.desc}`, W / 2, achY + 8 + i * 22);
+      ctx.fillText(ach.name + ' — ' + ach.desc, W / 2, achY + 8 + i * 22);
     });
   }
 
-  // Restart
   const pulse = Math.sin(performance.now() / 500) * 0.1 + 0.9;
   ctx.globalAlpha = pulse;
   ctx.font = 'bold 20px "Noto Serif TC", serif';
@@ -1418,14 +1476,20 @@ function drawGameOver() {
   ctx.globalAlpha = 1;
 }
 
-// ─── Main Loop ─────────────────────────────────────────────
+// --- Main Loop ---
 let lastTime = 0;
 
 function gameLoop(timestamp) {
   requestAnimationFrame(gameLoop);
 
-  const dt = lastTime ? Math.min(timestamp - lastTime, 50) : 16.67; // cap at 50ms
+  const dtMs = lastTime ? Math.min(timestamp - lastTime, 50) : 16.67;
+  const dtSec = dtMs / 1000;
   lastTime = timestamp;
+
+  if (state === STATE.LOADING) {
+    drawLoadingScreen();
+    return;
+  }
 
   if (state === STATE.MENU) {
     drawMenu();
@@ -1444,23 +1508,27 @@ function gameLoop(timestamp) {
 
   if (state !== STATE.PLAYING) return;
 
-  // ── Update ──
-  gameTime += dt;
+  // --- Update ---
+  gameTime += dtMs;
 
-  // BPM acceleration (gradual)
+  // BPM acceleration
   const elapsed = (timestamp - startTime) / 1000;
-  bpm = 80 + elapsed * 0.3; // +0.3 BPM per second
-  bpm = Math.min(bpm, 200);  // cap at 200 BPM
+  bpm = 80 + elapsed * 0.3;
+  bpm = Math.min(bpm, 200);
   beatInterval = 60000 / bpm;
+
+  // Beat indicator phase (0 to 1 between beats)
+  const timeSinceLastBeat = timestamp - lastBeatTime;
+  beatIndicatorPhase = Math.min(1, timeSinceLastBeat / beatInterval);
 
   // Spawn notes on beat
   if (timestamp - lastBeatTime >= beatInterval) {
     lastBeatTime = timestamp;
     spawnNote();
     playBeatTick();
-    beatPulse = 1; // Trigger beat pulse
+    beatPulse = 1;
+    beatIndicatorPhase = 0;
 
-    // Extra notes at higher BPM (spawn in different lanes)
     if (bpm > 120 && Math.random() < 0.3) {
       spawnNote();
     }
@@ -1472,18 +1540,26 @@ function gameLoop(timestamp) {
   // Decay beat pulse
   beatPulse *= 0.92;
 
-  updateNotes(dt);
-  updateParticles();
+  // Update timers (time-based)
+  if (hitFeedback && hitFeedback.timer > 0) hitFeedback.timer -= dtSec;
+  if (meaningDisplay && meaningDisplay.timer > 0) meaningDisplay.timer -= dtSec;
+  if (milestoneDisplay && milestoneDisplay.timer > 0) milestoneDisplay.timer -= dtSec;
+  if (achievementPopup && achievementPopup.timer > 0) achievementPopup.timer -= dtSec;
+
+  updateNotes(dtSec);
+  updateParticles(dtSec);
+  updateRipples(dtSec);
   updateShake();
 
-  // ── Draw ──
+  // --- Draw ---
   drawPlayingScene();
 }
 
-// ─── Init ──────────────────────────────────────────────────
+// --- Init ---
 function init() {
   initCanvas();
   initParticlePool();
+  initRipples();
   initInput();
   loadBestScore();
   loadCollection();
@@ -1493,8 +1569,33 @@ function init() {
   requestAnimationFrame(gameLoop);
 }
 
-// Wait for fonts, then start
+// Pre-init: show loading screen while fonts load
+function preInit() {
+  const tempCanvas = document.getElementById('game');
+  const tempCtx = tempCanvas.getContext('2d');
+  const tempW = window.innerWidth;
+  const tempH = window.innerHeight;
+  const tempDpr = Math.min(window.devicePixelRatio || 1, 2);
+  tempCanvas.width = tempW * tempDpr;
+  tempCanvas.height = tempH * tempDpr;
+  tempCanvas.style.width = tempW + 'px';
+  tempCanvas.style.height = tempH + 'px';
+  tempCtx.setTransform(tempDpr, 0, 0, tempDpr, 0, 0);
+
+  const grad = tempCtx.createLinearGradient(0, 0, 0, tempH);
+  grad.addColorStop(0, '#0a0a12');
+  grad.addColorStop(1, '#1a1a2e');
+  tempCtx.fillStyle = grad;
+  tempCtx.fillRect(0, 0, tempW, tempH);
+  tempCtx.fillStyle = '#8888aa';
+  tempCtx.font = '18px sans-serif';
+  tempCtx.textAlign = 'center';
+  tempCtx.textBaseline = 'middle';
+  tempCtx.fillText('載入中...', tempW / 2, tempH / 2);
+}
+
 if (document.fonts && document.fonts.ready) {
+  preInit();
   document.fonts.ready.then(init);
 } else {
   window.addEventListener('load', init);

@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <meta name="description" content="禪磚破 - 擊碎煩惱磚塊，體悟空性智慧。經典打磚塊融合禪意美學。">
+  <meta name="theme-color" content="#0a0a12">
+  <title>禪磚破 - Zen Breakout</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@400;700&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Noto Serif TC', 'Microsoft JhengHei', serif;
+      background: #0a0a12;
+      color: #e8d5b7;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+      overflow-x: hidden;
+    }
+
+    .site-header {
+      width: 100%;
+      padding: 12px 20px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .site-header a {
+      color: #8888aa;
+      text-decoration: none;
+      font-size: 0.9rem;
+      transition: color 0.2s;
+    }
+
+    .site-header a:hover {
+      color: #ffd700;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 520px;
+      padding: 0 12px 24px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    h1 {
+      font-size: clamp(1.4rem, 4vw, 2rem);
+      margin-bottom: 8px;
+      color: #e8d5b7;
+      text-align: center;
+      font-weight: 700;
+    }
+
+    #game {
+      display: block;
+      border: 2px solid #2a2a3e;
+      border-radius: 8px;
+      width: 100%;
+      max-width: 480px;
+      touch-action: none;
+      cursor: pointer;
+    }
+
+    #hud {
+      width: 100%;
+      max-width: 480px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 10px;
+      padding: 0 4px;
+      font-size: 0.9rem;
+      color: #8888aa;
+    }
+
+    #hud strong {
+      color: #ffd700;
+      font-size: 1.05em;
+    }
+
+    .controls-hint {
+      text-align: center;
+      margin-top: 8px;
+      color: #555580;
+      font-size: 0.78rem;
+    }
+
+    kbd {
+      display: inline-block;
+      padding: 2px 6px;
+      margin: 0 2px;
+      font-size: 0.72rem;
+      font-family: inherit;
+      background: #1a1a2e;
+      border: 1px solid #2a2a3e;
+      border-radius: 4px;
+      color: #e8d5b7;
+    }
+
+    .pause-btn {
+      margin-top: 10px;
+      padding: 8px 24px;
+      border-radius: 20px;
+      border: 1px solid #2a2a3e;
+      background: transparent;
+      color: #8888aa;
+      font-size: 0.85rem;
+      font-family: inherit;
+      cursor: pointer;
+      transition: background 0.2s, border-color 0.2s;
+    }
+
+    .pause-btn:hover,
+    .pause-btn:active {
+      background: rgba(255, 215, 0, 0.1);
+      border-color: #ffd700;
+    }
+
+    .touch-controls {
+      display: none;
+      margin-top: 14px;
+      width: 100%;
+      max-width: 480px;
+      justify-content: center;
+      gap: 16px;
+    }
+
+    .touch-btn {
+      width: 80px;
+      height: 56px;
+      border-radius: 12px;
+      border: 2px solid #2a2a3e;
+      background: rgba(26, 26, 46, 0.8);
+      color: #8888aa;
+      font-size: 1.6rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: background 0.15s, border-color 0.15s;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
+    }
+
+    .touch-btn:active {
+      background: rgba(255, 215, 0, 0.15);
+      border-color: #ffd700;
+    }
+
+    @media (hover: none) and (pointer: coarse) {
+      .touch-controls {
+        display: flex;
+      }
+    }
+
+    @media (max-width: 520px) {
+      .container {
+        padding: 0 6px 16px;
+      }
+      #hud {
+        font-size: 0.8rem;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header class="site-header">
+    <a href="../">&larr; 返回遊廊</a>
+  </header>
+
+  <main class="container">
+    <h1>禪磚破</h1>
+    <canvas id="game" width="480" height="640"></canvas>
+    <div id="hud">
+      <span>分數: <strong id="scoreVal">0</strong></span>
+      <span>關卡: <strong id="levelVal">1</strong></span>
+      <span>生命: <strong id="livesVal">3</strong></span>
+      <span>最高: <strong id="highVal">0</strong></span>
+    </div>
+    <p class="controls-hint" id="controlsHint"></p>
+
+    <button class="pause-btn" id="pauseBtn">暫停</button>
+
+    <div class="touch-controls" id="touchControls">
+      <button class="touch-btn" id="btnLeft" aria-label="左移">&#9664;</button>
+      <button class="touch-btn" id="btnLaunch" aria-label="發射">&#9650;</button>
+      <button class="touch-btn" id="btnRight" aria-label="右移">&#9654;</button>
+    </div>
+  </main>
+
+  <script src="game.js"></script>
+</body>
+</html>

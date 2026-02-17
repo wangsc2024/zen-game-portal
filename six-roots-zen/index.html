@@ -22,6 +22,7 @@
             justify-content: center;
             color: #e8d5b7;
             overflow: hidden;
+            touch-action: manipulation;
         }
 
         .container {
@@ -165,6 +166,62 @@
             color: #5a6070;
         }
 
+        /* 手機觸控提示 */
+        .mobile-input-hint {
+            display: none;
+            text-align: center;
+            padding: 0.75rem 1.5rem;
+            margin-bottom: 0.75rem;
+            background: rgba(244, 208, 63, 0.15);
+            border: 1px dashed rgba(244, 208, 63, 0.4);
+            border-radius: 0.5rem;
+            color: #f4d03f;
+            font-size: 0.9rem;
+            cursor: pointer;
+            animation: hintPulse 2s ease-in-out infinite;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        .mobile-input-hint.active {
+            background: rgba(76, 175, 80, 0.15);
+            border-color: rgba(76, 175, 80, 0.4);
+            color: #4caf50;
+            animation: none;
+        }
+
+        @keyframes hintPulse {
+            0%, 100% { opacity: 0.7; }
+            50% { opacity: 1; }
+        }
+
+        /* 手機遊戲內頂部統計列 */
+        .mobile-game-header {
+            display: none;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.5rem 0.75rem;
+            margin-bottom: 0.5rem;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 0.5rem;
+            font-size: 0.85rem;
+        }
+
+        .mobile-game-header .mgh-item {
+            text-align: center;
+            flex: 1;
+        }
+
+        .mobile-game-header .mgh-value {
+            font-size: 1.1rem;
+            font-weight: bold;
+            color: #f4d03f;
+        }
+
+        .mobile-game-header .mgh-label {
+            font-size: 0.6rem;
+            color: #8892a8;
+        }
+
         /* 狀態列 */
         .stats {
             display: flex;
@@ -229,6 +286,7 @@
             cursor: pointer;
             transition: all 0.3s ease;
             font-family: inherit;
+            -webkit-tap-highlight-color: transparent;
         }
 
         .btn-primary {
@@ -489,6 +547,7 @@
             cursor: pointer;
             transition: all 0.3s ease;
             font-family: inherit;
+            -webkit-tap-highlight-color: transparent;
         }
 
         .mode-btn:hover {
@@ -718,25 +777,100 @@
             h1 {
                 font-size: 1.8rem;
             }
+            .subtitle {
+                font-size: 0.85rem;
+                margin-bottom: 1rem;
+            }
             .zen-text {
                 font-size: 1.5rem;
                 letter-spacing: 0.3rem;
             }
+            .zen-display {
+                padding: 1.25rem;
+                margin-bottom: 1rem;
+            }
             .root-icon {
-                width: 50px;
-                height: 50px;
-                font-size: 1.2rem;
+                width: 44px;
+                height: 44px;
+                font-size: 1.1rem;
+            }
+            .root-icon::after {
+                font-size: 0.65rem;
+                bottom: -1.2rem;
+            }
+            .roots-wheel {
+                gap: 0.6rem;
+                margin-bottom: 1.5rem;
+            }
+            .container {
+                padding: 1rem;
             }
             .stats {
-                gap: 1rem;
+                gap: 0.5rem;
             }
-            .wpm-display, .lightning-timer {
-                position: static;
+            .stat-item {
+                padding: 0.5rem 0.75rem;
+            }
+            .stat-label {
+                font-size: 0.65rem;
+            }
+            .stat-value {
+                font-size: 1rem;
+            }
+            /* 手機隱藏桌面版固定定位元素 */
+            .wpm-display, .combo-display, .lightning-timer {
+                position: static !important;
                 text-align: center;
-                margin-bottom: 1rem;
+                margin-bottom: 0;
+                display: none !important;
+            }
+            /* 手機用頂部統計列 */
+            .mobile-game-header {
+                display: flex;
             }
             .mode-btn .mode-desc {
                 display: none;
+            }
+            .mode-btn {
+                padding: 0.5rem 0.9rem;
+                font-size: 0.85rem;
+            }
+            .focus-bar-container {
+                margin-bottom: 1rem;
+            }
+            #zen-input {
+                font-size: 1.2rem;
+                padding: 0.75rem;
+            }
+            .btn {
+                padding: 0.8rem 1.5rem;
+                font-size: 1rem;
+            }
+            .message {
+                font-size: 0.85rem;
+                padding: 0.75rem 1.5rem;
+            }
+            .achievement-popup {
+                font-size: 1rem;
+                padding: 1rem 2rem;
+            }
+            .milestone-toast {
+                font-size: 1.2rem;
+                padding: 0.75rem 1.5rem;
+            }
+            .perfect-complete {
+                font-size: 2rem;
+            }
+            .start-screen p {
+                font-size: 0.9rem;
+                line-height: 1.6;
+            }
+        }
+
+        /* 觸控裝置自動顯示觸控提示 */
+        @media (hover: none) and (pointer: coarse) {
+            .mobile-input-hint {
+                display: block;
             }
         }
 
@@ -749,6 +883,7 @@
             font-size: 0.9rem;
             z-index: 300;
             transition: color 0.3s ease;
+            -webkit-tap-highlight-color: transparent;
         }
 
         .back-link:hover {
@@ -757,27 +892,27 @@
     </style>
 </head>
 <body>
-    <a href="../" class="back-link">← 返回遊廊</a>
+    <a href="../" class="back-link">&#8592; 返回遊廊</a>
     <!-- 粒子背景 -->
     <div class="particles" id="particles"></div>
 
-    <!-- WPM 顯示 -->
+    <!-- WPM 顯示（桌面版） -->
     <div class="wpm-display hidden" id="wpm-display">
         <div class="wpm-value" id="wpm-value">0</div>
         <div class="wpm-label">字/分鐘</div>
     </div>
 
-    <!-- Combo 連擊顯示 -->
+    <!-- Combo 連擊顯示（桌面版） -->
     <div class="combo-display hidden" id="combo-display">
         <div class="combo-count" id="combo-count">0</div>
         <div class="combo-label">連擊</div>
         <div class="combo-multiplier" id="combo-multiplier">&times;1.0</div>
     </div>
 
-    <!-- 閃電模式計時器 -->
+    <!-- 閃電模式計時器（桌面版） -->
     <div class="lightning-timer hidden" id="lightning-timer">
         <div class="lightning-timer-value" id="lightning-timer-value">10.0</div>
-        <div class="lightning-timer-label">⚡ 剩餘時間</div>
+        <div class="lightning-timer-label">&#9889; 剩餘時間</div>
     </div>
 
     <div class="container">
@@ -834,7 +969,7 @@
                 <span id="daily-challenge-text" style="color: #e8d5b7;">完成一輪零失誤淨化</span>
             </div>
 
-            <!-- 模式選擇器（移除 inline onclick，改由 JS addEventListener 綁定）-->
+            <!-- 模式選擇器 -->
             <div class="mode-selector">
                 <button class="mode-btn active" data-mode="standard">
                     <span class="mode-icon">&#x1F9D8;</span>標準模式
@@ -855,15 +990,38 @@
 
         <!-- 遊戲畫面 -->
         <div id="game-screen" class="hidden">
+            <!-- 手機遊戲內頂部統計列 -->
+            <div class="mobile-game-header" id="mobile-game-header">
+                <div class="mgh-item">
+                    <div class="mgh-value" id="mgh-combo">0</div>
+                    <div class="mgh-label">連擊</div>
+                </div>
+                <div class="mgh-item">
+                    <div class="mgh-value" id="mgh-wpm">0</div>
+                    <div class="mgh-label">字/分</div>
+                </div>
+                <div class="mgh-item">
+                    <div class="mgh-value" id="mgh-timer" style="display:none;">-</div>
+                    <div class="mgh-label" id="mgh-timer-label" style="display:none;">剩餘</div>
+                </div>
+            </div>
+
             <!-- 禪語顯示 -->
             <div class="zen-display">
                 <div class="zen-text" id="zen-text"></div>
                 <div style="font-size: 0.9rem; color: #8892a8;" id="zen-meaning"></div>
             </div>
 
+            <!-- 手機觸控提示（僅觸控裝置顯示） -->
+            <div class="mobile-input-hint" id="mobile-input-hint">
+                &#x1F449; 點此開啟鍵盤輸入禪語
+            </div>
+
             <!-- 輸入框 -->
             <div class="input-area">
-                <input type="text" id="zen-input" placeholder="在此輸入禪語..." autocomplete="off">
+                <input type="text" id="zen-input" placeholder="在此輸入禪語..."
+                       autocomplete="off" autocorrect="off" autocapitalize="off"
+                       spellcheck="false" inputmode="text">
             </div>
 
             <!-- 定力條 -->

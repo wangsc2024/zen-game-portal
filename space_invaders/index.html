@@ -16,6 +16,18 @@
       font-family: 'Courier New', monospace;
       touch-action: none;
     }
+    .back-link {
+      position: fixed;
+      top: 8px;
+      left: 8px;
+      color: #555;
+      text-decoration: none;
+      font-size: 0.85rem;
+      z-index: 20;
+      font-family: 'Courier New', monospace;
+      transition: color 0.3s;
+    }
+    .back-link:hover { color: #00ffcc; }
     #gameContainer {
       position: relative;
       width: 100%;
@@ -60,15 +72,40 @@
       display: flex;
       gap: 15px;
     }
+    #btnPause {
+      position: fixed;
+      top: 10px;
+      right: 10px;
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.25);
+      color: #fff;
+      font-size: 18px;
+      display: none;
+      justify-content: center;
+      align-items: center;
+      user-select: none;
+      -webkit-user-select: none;
+      z-index: 15;
+      cursor: pointer;
+    }
+    #btnPause:active {
+      background: rgba(255, 255, 255, 0.3);
+    }
     @media (pointer: coarse) {
       #touchControls { display: flex; }
+      #btnPause { display: flex; }
     }
   </style>
 </head>
 <body>
+  <a href="../index.html" class="back-link">&#8592; 返回</a>
   <div id="gameContainer">
     <canvas id="gameCanvas" width="480" height="640"></canvas>
   </div>
+  <div id="btnPause">&#10074;&#10074;</div>
   <div id="touchControls">
     <div class="touch-group">
       <div class="touch-btn" id="btnLeft">&#9664;</div>
