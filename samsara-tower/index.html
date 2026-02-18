@@ -1,0 +1,1096 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>輪迴塔 — Tower of Samsara</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: #0a0a12; }
+canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+.back-link {
+  position: fixed; top: 12px; left: 12px;
+  color: #8888aa; text-decoration: none; font-size: 0.9rem;
+  z-index: 300; transition: color 0.3s ease;
+  font-family: 'Noto Serif TC', serif;
+}
+.back-link:hover { color: #ffd700; }
+</style>
+</head>
+<body>
+<a href="../index.html" class="back-link">&#8592; 返回遊廊</a>
+<canvas id="game"></canvas>
+<script>
+'use strict';
+
+// ============================================================
+// 輪迴塔 — Tower of Samsara v1.0
+// Roguelike infinite tower climbing with Buddhist aesthetics
+// ============================================================
+
+(function() {
+
+// --- Canvas Setup ---
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+
+const BASE_W = 400;
+const BASE_H = 700;
+let W, H, scale;
+
+function resize() {
+  W = window.innerWidth;
+  H = window.innerHeight;
+  canvas.width = W;
+  canvas.height = H;
+  scale = Math.min(W / BASE_W, H / BASE_H);
+}
+resize();
+window.addEventListener('resize', resize);
+
+// --- Audio Engine (Web Audio API 8-bit synthesis) ---
+let audioCtx = null;
+
+function ensureAudio() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+}
+
+function playTone(freq, dur, type, vol) {
+  if (!audioCtx) return;
+  const t = audioCtx.currentTime;
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = type || 'square';
+  osc.frequency.setValueAtTime(freq, t);
+  gain.gain.setValueAtTime(vol || 0.1, t);
+  gain.gain.exponentialRampToValueAtTime(0.001, t + dur);
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+  osc.start(t);
+  osc.stop(t + dur);
+}
+
+function sfxJump()     { playTone(440, 0.08, 'square', 0.08); }
+function sfxLand()     { playTone(220, 0.05, 'triangle', 0.06); }
+function sfxCollect()  { playTone(880, 0.12, 'triangle', 0.1); playTone(1100, 0.08, 'sine', 0.06); }
+function sfxPowerUp()  { [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => playTone(f, 0.1, 'triangle', 0.08), i * 80)); }
+function sfxDeath()    { [400, 300, 200, 100].forEach((f, i) => setTimeout(() => playTone(f, 0.2, 'sawtooth', 0.1), i * 150)); }
+function sfxMenu()     { playTone(660, 0.06, 'square', 0.08); }
+function sfxRealmShift() { playTone(330, 0.3, 'sine', 0.12); setTimeout(() => playTone(440, 0.3, 'sine', 0.1), 200); }
+
+// --- Six Realms (六道) - Visual Themes ---
+const REALMS = [
+  { name: '地獄道', nameEn: 'Naraka', bg1: '#0a0008', bg2: '#1a0515', accent: '#ff2244', platColor: '#441122', glowColor: 'rgba(255,34,68,0.3)', threshold: 0 },
+  { name: '餓鬼道', nameEn: 'Preta',  bg1: '#0a0a08', bg2: '#1a1510', accent: '#cc8800', platColor: '#332800', glowColor: 'rgba(204,136,0,0.3)', threshold: 500 },
+  { name: '畜生道', nameEn: 'Animal', bg1: '#040a04', bg2: '#0a1a0a', accent: '#22cc44', platColor: '#0a3310', glowColor: 'rgba(34,204,68,0.3)', threshold: 1500 },
+  { name: '阿修羅道', nameEn: 'Asura', bg1: '#0a0408', bg2: '#1a0a1a', accent: '#aa44ff', platColor: '#220a44', glowColor: 'rgba(170,68,255,0.3)', threshold: 3000 },
+  { name: '人道', nameEn: 'Human',    bg1: '#08080a', bg2: '#14141e', accent: '#4488ff', platColor: '#112244', glowColor: 'rgba(68,136,255,0.3)', threshold: 5000 },
+  { name: '天道', nameEn: 'Deva',     bg1: '#0a0a10', bg2: '#181828', accent: '#ffd700', platColor: '#332e10', glowColor: 'rgba(255,215,0,0.4)', threshold: 8000 },
+];
+
+function getRealm(score) {
+  for (let i = REALMS.length - 1; i >= 0; i--) {
+    if (score >= REALMS[i].threshold) return i;
+  }
+  return 0;
+}
+
+// --- Zen Characters for collection ---
+const ZEN_CHARS = ['禪','定','慧','空','悟','淨','覺','明','戒','捨','忍','精','念','觀','行','願'];
+
+// --- Object Pool ---
+function createPool(size, factory) {
+  const pool = [];
+  for (let i = 0; i < size; i++) pool.push(factory());
+  return {
+    items: pool,
+    get() {
+      for (const item of pool) { if (!item.active) { item.active = true; return item; } }
+      return null;
+    },
+    forEach(fn) { for (const item of pool) { if (item.active) fn(item); } },
+    count() { let c = 0; for (const item of pool) { if (item.active) c++; } return c; }
+  };
+}
+
+// --- Particle Pool ---
+const particles = createPool(200, () => ({
+  active: false, x: 0, y: 0, vx: 0, vy: 0, life: 0, maxLife: 0, size: 0, color: '', type: 'circle'
+}));
+
+function spawnParticles(x, y, count, color, opts) {
+  const o = opts || {};
+  for (let i = 0; i < count; i++) {
+    const p = particles.get();
+    if (!p) break;
+    const angle = Math.random() * Math.PI * 2;
+    const speed = (o.speed || 2) + Math.random() * (o.speedVar || 2);
+    p.x = x; p.y = y;
+    p.vx = Math.cos(angle) * speed;
+    p.vy = Math.sin(angle) * speed + (o.gravity ? -1 : 0);
+    p.life = 0;
+    p.maxLife = (o.life || 30) + Math.random() * (o.lifeVar || 15);
+    p.size = (o.size || 3) + Math.random() * (o.sizeVar || 2);
+    p.color = color;
+    p.type = o.type || 'circle';
+  }
+}
+
+function updateParticles() {
+  particles.forEach(p => {
+    p.x += p.vx;
+    p.y += p.vy;
+    p.vy += 0.05;
+    p.vx *= 0.99;
+    p.life++;
+    if (p.life >= p.maxLife) p.active = false;
+  });
+}
+
+function drawParticles(camY) {
+  particles.forEach(p => {
+    const alpha = 1 - p.life / p.maxLife;
+    const sz = p.size * alpha * scale;
+    const sx = (p.x - cameraX()) * scale + W / 2;
+    const sy = (p.y - camY) * scale;
+    ctx.globalAlpha = alpha * 0.8;
+    ctx.fillStyle = p.color;
+    if (p.type === 'circle') {
+      ctx.beginPath();
+      ctx.arc(sx, sy, sz, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      ctx.fillRect(sx - sz/2, sy - sz/2, sz, sz);
+    }
+  });
+  ctx.globalAlpha = 1;
+}
+
+// --- Platform Pool ---
+const MAX_PLATFORMS = 60;
+const platforms = createPool(MAX_PLATFORMS, () => ({
+  active: false, x: 0, y: 0, w: 0, type: 'normal', hasCollectible: false, collectibleChar: '', collectibleTaken: false,
+  hasPowerUp: false, powerUpType: '', powerUpTaken: false, crumbleTimer: 0, moveDir: 0, moveRange: 0, originX: 0
+}));
+
+const PLAT_H = 12;
+const PLAT_SPACING = 55;
+
+// --- Player ---
+const player = {
+  x: 0, y: 0, vx: 0, vy: 0, w: 24, h: 30,
+  onGround: false, facingLeft: false, jumpCount: 0, maxJumps: 1,
+  shieldTimer: 0, boostTimer: 0, doubleJumpActive: false,
+  trail: []
+};
+
+// --- Game State ---
+const STATE = { MENU: 0, PLAYING: 1, PAUSED: 2, GAMEOVER: 3 };
+let state = STATE.MENU;
+let score = 0;
+let highScore = parseInt(localStorage.getItem('samsara_hi') || '0', 10);
+let bestFloor = parseInt(localStorage.getItem('samsara_floor') || '0', 10);
+let floor = 0;
+let cameraTargetY = 0;
+let cameraY = 0;
+let highestY = 0;
+let realmIndex = 0;
+let realmTransitionAlpha = 0;
+let prevRealmIndex = 0;
+let zenCollected = [];
+let screenShake = 0;
+let gameTime = 0;
+let difficultyMult = 1;
+let lowestPlatformY = 0;
+let highestPlatformY = 0;
+
+// --- Input ---
+let keys = {};
+let touchStartX = null;
+let touchMoveX = null;
+let touchTapped = false;
+
+document.addEventListener('keydown', e => {
+  keys[e.key] = true;
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    if (state === STATE.PLAYING) state = STATE.PAUSED;
+    else if (state === STATE.PAUSED) state = STATE.PLAYING;
+  }
+  if ((e.key === 'Enter' || e.key === ' ') && state === STATE.MENU) { ensureAudio(); sfxMenu(); startGame(); }
+  if ((e.key === 'Enter' || e.key === ' ') && state === STATE.GAMEOVER) { ensureAudio(); sfxMenu(); startGame(); }
+  if (e.key === ' ' && state === STATE.PLAYING) { e.preventDefault(); tryJump(); }
+  if ((e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') && state === STATE.PLAYING) tryJump();
+  ensureAudio();
+});
+document.addEventListener('keyup', e => { keys[e.key] = false; });
+
+canvas.addEventListener('touchstart', e => {
+  e.preventDefault();
+  ensureAudio();
+  if (state === STATE.MENU || state === STATE.GAMEOVER) { sfxMenu(); startGame(); return; }
+  const t = e.touches[0];
+  touchStartX = t.clientX;
+  touchMoveX = t.clientX;
+  touchTapped = true;
+  setTimeout(() => { touchTapped = false; }, 200);
+}, { passive: false });
+
+canvas.addEventListener('touchmove', e => {
+  e.preventDefault();
+  if (e.touches.length > 0) touchMoveX = e.touches[0].clientX;
+}, { passive: false });
+
+canvas.addEventListener('touchend', e => {
+  e.preventDefault();
+  if (touchTapped && state === STATE.PLAYING) tryJump();
+  touchStartX = null;
+  touchMoveX = null;
+}, { passive: false });
+
+canvas.addEventListener('click', () => {
+  ensureAudio();
+  if (state === STATE.MENU || state === STATE.GAMEOVER) { sfxMenu(); startGame(); }
+});
+
+// Pause button via touch on top-right area
+canvas.addEventListener('pointerdown', e => {
+  const rect = canvas.getBoundingClientRect();
+  const px = e.clientX - rect.left;
+  const py = e.clientY - rect.top;
+  if (px > W - 60 && py < 60 && (state === STATE.PLAYING || state === STATE.PAUSED)) {
+    if (state === STATE.PLAYING) state = STATE.PAUSED;
+    else state = STATE.PLAYING;
+  }
+});
+
+function cameraX() { return 0; }
+
+// --- Game Init ---
+function startGame() {
+  state = STATE.PLAYING;
+  score = 0;
+  floor = 0;
+  gameTime = 0;
+  difficultyMult = 1;
+  realmIndex = 0;
+  prevRealmIndex = 0;
+  realmTransitionAlpha = 0;
+  zenCollected = [];
+  screenShake = 0;
+
+  player.x = 0;
+  player.y = 0;
+  player.vx = 0;
+  player.vy = 0;
+  player.onGround = false;
+  player.jumpCount = 0;
+  player.maxJumps = 1;
+  player.shieldTimer = 0;
+  player.boostTimer = 0;
+  player.doubleJumpActive = false;
+  player.trail = [];
+
+  // Reset pools
+  platforms.items.forEach(p => p.active = false);
+  particles.items.forEach(p => p.active = false);
+
+  // Create initial platforms
+  highestPlatformY = 100;
+  lowestPlatformY = 100;
+
+  // Starting platform (wide, centered)
+  const startPlat = platforms.get();
+  if (startPlat) {
+    startPlat.x = -40; startPlat.y = 50; startPlat.w = 80;
+    startPlat.type = 'normal'; startPlat.hasCollectible = false; startPlat.hasPowerUp = false;
+    startPlat.crumbleTimer = 0; startPlat.moveDir = 0;
+  }
+  player.y = 50 - player.h;
+  player.onGround = true;
+
+  generatePlatforms(-PLAT_SPACING * 30);
+  cameraY = player.y - H / (2 * scale);
+  cameraTargetY = cameraY;
+  highestY = player.y;
+}
+
+function generatePlatforms(upToY) {
+  while (highestPlatformY > upToY) {
+    highestPlatformY -= PLAT_SPACING + Math.random() * 15;
+    const plat = platforms.get();
+    if (!plat) break;
+
+    const halfW = BASE_W / 2 - 30;
+    plat.x = (Math.random() * 2 - 1) * halfW;
+    plat.y = highestPlatformY;
+    plat.w = 50 + Math.random() * 30;
+    plat.collectibleTaken = false;
+    plat.powerUpTaken = false;
+    plat.crumbleTimer = 0;
+
+    // Difficulty-based type selection
+    const diff = Math.min(difficultyMult, 3);
+    const rand = Math.random();
+    if (rand < 0.05 * diff && diff > 1.2) {
+      plat.type = 'crumble';
+      plat.w = 55 + Math.random() * 20;
+    } else if (rand < 0.08 * diff && diff > 1.0) {
+      plat.type = 'moving';
+      plat.moveRange = 40 + Math.random() * 40;
+      plat.originX = plat.x;
+      plat.moveDir = Math.random() > 0.5 ? 1 : -1;
+    } else if (rand < 0.03 * diff && diff > 1.5) {
+      plat.type = 'spike';
+      plat.w = 50;
+    } else {
+      plat.type = 'normal';
+    }
+
+    // Collectible zen character
+    if (Math.random() < 0.2 && plat.type !== 'spike') {
+      plat.hasCollectible = true;
+      plat.collectibleChar = ZEN_CHARS[Math.floor(Math.random() * ZEN_CHARS.length)];
+    } else {
+      plat.hasCollectible = false;
+    }
+
+    // Power-up (rarer)
+    if (Math.random() < 0.06 && plat.type === 'normal') {
+      plat.hasPowerUp = true;
+      const types = ['doubleJump', 'shield', 'boost'];
+      plat.powerUpType = types[Math.floor(Math.random() * types.length)];
+    } else {
+      plat.hasPowerUp = false;
+    }
+  }
+}
+
+// --- Jump ---
+function tryJump() {
+  if (player.onGround || player.jumpCount < player.maxJumps) {
+    player.vy = -8.5;
+    player.jumpCount++;
+    player.onGround = false;
+    sfxJump();
+    spawnParticles(player.x, player.y + player.h, 5, REALMS[realmIndex].accent, { speed: 1, speedVar: 1.5, life: 15, size: 2, sizeVar: 1 });
+  }
+}
+
+// --- Update ---
+function update() {
+  if (state !== STATE.PLAYING) return;
+  gameTime++;
+  difficultyMult = 1 + gameTime / 3600; // slowly increase over 60 seconds
+
+  // Input
+  let moveX = 0;
+  if (keys['ArrowLeft'] || keys['a'] || keys['A']) moveX = -1;
+  if (keys['ArrowRight'] || keys['d'] || keys['D']) moveX = 1;
+
+  // Touch tilt control
+  if (touchStartX !== null && touchMoveX !== null) {
+    const dx = touchMoveX - touchStartX;
+    if (Math.abs(dx) > 10) moveX = dx > 0 ? 1 : -1;
+  }
+
+  // Apply movement
+  const accel = player.onGround ? 0.8 : 0.5;
+  const maxSpeed = player.boostTimer > 0 ? 7 : 5;
+  player.vx += moveX * accel;
+  player.vx *= 0.88; // friction
+  player.vx = Math.max(-maxSpeed, Math.min(maxSpeed, player.vx));
+  if (moveX !== 0) player.facingLeft = moveX < 0;
+
+  // Gravity
+  player.vy += 0.38;
+  if (player.vy > 12) player.vy = 12;
+
+  // Move player
+  player.x += player.vx;
+  player.y += player.vy;
+
+  // Wrap horizontally
+  const halfWorld = BASE_W / 2 + 20;
+  if (player.x < -halfWorld) player.x = halfWorld;
+  if (player.x > halfWorld) player.x = -halfWorld;
+
+  // Player trail
+  player.trail.push({ x: player.x, y: player.y + player.h / 2 });
+  if (player.trail.length > 8) player.trail.shift();
+
+  // Platform collision (only when falling)
+  player.onGround = false;
+  if (player.vy >= 0) {
+    platforms.forEach(plat => {
+      if (plat.type === 'spike' && player.shieldTimer <= 0) return; // spikes hurt
+      const px = player.x - player.w / 2;
+      const py = player.y + player.h;
+      const prevPy = py - player.vy;
+
+      if (px + player.w > plat.x - plat.w / 2 &&
+          px < plat.x + plat.w / 2 &&
+          prevPy <= plat.y &&
+          py >= plat.y &&
+          py <= plat.y + PLAT_H + 4) {
+        player.y = plat.y - player.h;
+        player.vy = 0;
+        player.onGround = true;
+        player.jumpCount = 0;
+        if (player.doubleJumpActive) player.maxJumps = 2;
+        else player.maxJumps = 1;
+
+        sfxLand();
+
+        if (plat.type === 'crumble') {
+          plat.crumbleTimer++;
+          if (plat.crumbleTimer > 20) {
+            plat.active = false;
+            spawnParticles(plat.x, plat.y, 8, REALMS[realmIndex].accent, { type: 'square', size: 3, life: 20 });
+          }
+        }
+      }
+    });
+  }
+
+  // Spike collision (falling onto spike platform)
+  if (player.shieldTimer <= 0) {
+    platforms.forEach(plat => {
+      if (plat.type !== 'spike') return;
+      const px = player.x - player.w / 2;
+      const py = player.y + player.h;
+      if (px + player.w > plat.x - plat.w / 2 &&
+          px < plat.x + plat.w / 2 &&
+          py >= plat.y - 5 && py <= plat.y + PLAT_H + 8 &&
+          player.vy >= 0) {
+        die();
+      }
+    });
+  }
+
+  // Update moving platforms
+  platforms.forEach(plat => {
+    if (plat.type === 'moving') {
+      plat.x = plat.originX + Math.sin(gameTime * 0.02 * plat.moveDir) * plat.moveRange;
+    }
+  });
+
+  // Collect zen characters
+  platforms.forEach(plat => {
+    if (plat.hasCollectible && !plat.collectibleTaken) {
+      const cx = plat.x;
+      const cy = plat.y - 25;
+      const dx = player.x - cx;
+      const dy = (player.y + player.h / 2) - cy;
+      if (dx * dx + dy * dy < 25 * 25) {
+        plat.collectibleTaken = true;
+        zenCollected.push(plat.collectibleChar);
+        score += 50;
+        sfxCollect();
+        spawnParticles(cx, cy, 10, '#ffd700', { speed: 1.5, life: 25, size: 2 });
+      }
+    }
+  });
+
+  // Collect power-ups
+  platforms.forEach(plat => {
+    if (plat.hasPowerUp && !plat.powerUpTaken) {
+      const cx = plat.x;
+      const cy = plat.y - 20;
+      const dx = player.x - cx;
+      const dy = (player.y + player.h / 2) - cy;
+      if (dx * dx + dy * dy < 22 * 22) {
+        plat.powerUpTaken = true;
+        applyPowerUp(plat.powerUpType);
+        sfxPowerUp();
+        spawnParticles(cx, cy, 15, '#00ffaa', { speed: 2, life: 30, size: 3 });
+      }
+    }
+  });
+
+  // Score based on height
+  if (player.y < highestY) {
+    const heightGain = highestY - player.y;
+    score += Math.floor(heightGain * 0.5);
+    floor = Math.floor(-player.y / PLAT_SPACING) + 1;
+    highestY = player.y;
+  }
+
+  // Realm transition
+  const newRealm = getRealm(score);
+  if (newRealm !== realmIndex) {
+    prevRealmIndex = realmIndex;
+    realmIndex = newRealm;
+    realmTransitionAlpha = 1;
+    sfxRealmShift();
+    screenShake = 15;
+    spawnParticles(player.x, player.y, 20, REALMS[realmIndex].accent, { speed: 3, speedVar: 3, life: 40, size: 4 });
+  }
+  if (realmTransitionAlpha > 0) realmTransitionAlpha -= 0.02;
+
+  // Camera
+  cameraTargetY = player.y - H / (2 * scale) + 50;
+  cameraY += (cameraTargetY - cameraY) * 0.1;
+
+  // Generate new platforms above
+  generatePlatforms(cameraY - 200);
+
+  // Remove platforms below screen
+  platforms.forEach(plat => {
+    if (plat.y > cameraY + H / scale + 100) plat.active = false;
+  });
+
+  // Death: fell below camera
+  if (player.y > cameraY + H / scale + 50) {
+    die();
+  }
+
+  // Timers
+  if (player.shieldTimer > 0) player.shieldTimer--;
+  if (player.boostTimer > 0) player.boostTimer--;
+  if (screenShake > 0) screenShake--;
+
+  updateParticles();
+}
+
+function applyPowerUp(type) {
+  switch (type) {
+    case 'doubleJump':
+      player.doubleJumpActive = true;
+      player.maxJumps = 2;
+      break;
+    case 'shield':
+      player.shieldTimer = 600; // 10 seconds
+      break;
+    case 'boost':
+      player.boostTimer = 300; // 5 seconds
+      break;
+  }
+}
+
+function die() {
+  if (state !== STATE.PLAYING) return;
+  state = STATE.GAMEOVER;
+  sfxDeath();
+  screenShake = 20;
+  spawnParticles(player.x, player.y, 30, REALMS[realmIndex].accent, { speed: 3, speedVar: 4, life: 40, size: 4 });
+
+  if (score > highScore) {
+    highScore = score;
+    localStorage.setItem('samsara_hi', String(highScore));
+  }
+  if (floor > bestFloor) {
+    bestFloor = floor;
+    localStorage.setItem('samsara_floor', String(bestFloor));
+  }
+}
+
+// --- Rendering ---
+function drawBg(realm) {
+  const r = REALMS[realm];
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, r.bg1);
+  grad.addColorStop(1, r.bg2);
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+
+  // Floating particles background
+  ctx.globalAlpha = 0.15;
+  const t = gameTime * 0.01;
+  for (let i = 0; i < 20; i++) {
+    const bx = (Math.sin(t + i * 1.3) * 0.5 + 0.5) * W;
+    const by = ((t * 20 + i * 37) % H);
+    ctx.fillStyle = r.accent;
+    ctx.beginPath();
+    ctx.arc(bx, by, 1.5 * scale, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawPlatform(plat, camY, realm) {
+  const r = REALMS[realm];
+  const sx = (plat.x - plat.w / 2) * scale + W / 2;
+  const sy = (plat.y - camY) * scale;
+  const sw = plat.w * scale;
+  const sh = PLAT_H * scale;
+
+  // Skip if off screen
+  if (sy > H + 20 || sy < -40) return;
+
+  // Platform glow
+  ctx.shadowColor = r.glowColor;
+  ctx.shadowBlur = 10 * scale;
+
+  if (plat.type === 'spike') {
+    // Spike platform - red with triangles
+    ctx.fillStyle = '#ff2244';
+    ctx.fillRect(sx, sy, sw, sh);
+    // Spike triangles on top
+    ctx.fillStyle = '#ff4466';
+    const spikeW = 8 * scale;
+    for (let sx2 = sx; sx2 < sx + sw - spikeW / 2; sx2 += spikeW) {
+      ctx.beginPath();
+      ctx.moveTo(sx2, sy);
+      ctx.lineTo(sx2 + spikeW / 2, sy - 6 * scale);
+      ctx.lineTo(sx2 + spikeW, sy);
+      ctx.fill();
+    }
+  } else if (plat.type === 'crumble') {
+    // Crumbling platform - dashed look
+    const alpha = Math.max(0.3, 1 - plat.crumbleTimer / 20);
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = r.platColor;
+    // Draw as fragmented blocks
+    const segW = sw / 5;
+    for (let i = 0; i < 5; i++) {
+      const offset = plat.crumbleTimer > 0 ? (Math.random() - 0.5) * plat.crumbleTimer * 0.5 * scale : 0;
+      ctx.fillRect(sx + i * segW + 1, sy + offset, segW - 2, sh);
+    }
+    ctx.globalAlpha = 1;
+  } else if (plat.type === 'moving') {
+    // Moving platform - with arrows
+    ctx.fillStyle = r.platColor;
+    ctx.fillRect(sx, sy, sw, sh);
+    // Arrow indicators
+    ctx.fillStyle = r.accent;
+    ctx.globalAlpha = 0.5;
+    ctx.font = `${10 * scale}px monospace`;
+    ctx.textAlign = 'center';
+    ctx.fillText('< >', sx + sw / 2, sy + sh / 2 + 3 * scale);
+    ctx.globalAlpha = 1;
+  } else {
+    // Normal platform
+    ctx.fillStyle = r.platColor;
+    ctx.fillRect(sx, sy, sw, sh);
+    // Top highlight
+    ctx.fillStyle = r.accent;
+    ctx.globalAlpha = 0.4;
+    ctx.fillRect(sx, sy, sw, 2 * scale);
+    ctx.globalAlpha = 1;
+  }
+  ctx.shadowBlur = 0;
+
+  // Draw collectible
+  if (plat.hasCollectible && !plat.collectibleTaken) {
+    const cx = plat.x * scale + W / 2;
+    const cy = (plat.y - 25 - camY) * scale;
+    const bob = Math.sin(gameTime * 0.05) * 3 * scale;
+
+    // Glow
+    ctx.shadowColor = '#ffd700';
+    ctx.shadowBlur = 12 * scale;
+    ctx.fillStyle = '#ffd700';
+    ctx.font = `bold ${16 * scale}px serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(plat.collectibleChar, cx, cy + bob);
+    ctx.shadowBlur = 0;
+  }
+
+  // Draw power-up
+  if (plat.hasPowerUp && !plat.powerUpTaken) {
+    const cx = plat.x * scale + W / 2;
+    const cy = (plat.y - 20 - camY) * scale;
+    const bob = Math.sin(gameTime * 0.06 + 1) * 3 * scale;
+    const puColors = { doubleJump: '#00ffaa', shield: '#44aaff', boost: '#ff8800' };
+    const puIcons = { doubleJump: '++', shield: '()' , boost: '>>' };
+    const color = puColors[plat.powerUpType] || '#fff';
+
+    // Circle bg
+    ctx.beginPath();
+    ctx.arc(cx, cy + bob, 10 * scale, 0, Math.PI * 2);
+    ctx.fillStyle = color;
+    ctx.globalAlpha = 0.3;
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    // Icon
+    ctx.fillStyle = color;
+    ctx.font = `bold ${10 * scale}px monospace`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(puIcons[plat.powerUpType], cx, cy + bob);
+  }
+}
+
+function drawPlayer(camY) {
+  const sx = player.x * scale + W / 2;
+  const sy = (player.y - camY) * scale;
+  const sw = player.w * scale;
+  const sh = player.h * scale;
+
+  const realm = REALMS[realmIndex];
+
+  // Trail
+  for (let i = 0; i < player.trail.length; i++) {
+    const t = player.trail[i];
+    const alpha = (i / player.trail.length) * 0.3;
+    const tsx = t.x * scale + W / 2;
+    const tsy = (t.y - camY) * scale;
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = realm.accent;
+    ctx.beginPath();
+    ctx.arc(tsx, tsy, 4 * scale * (i / player.trail.length), 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+
+  // Shield effect
+  if (player.shieldTimer > 0) {
+    ctx.strokeStyle = '#44aaff';
+    ctx.lineWidth = 2 * scale;
+    ctx.globalAlpha = 0.4 + Math.sin(gameTime * 0.1) * 0.2;
+    ctx.beginPath();
+    ctx.arc(sx, sy + sh / 2, 20 * scale, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+
+  // Body
+  ctx.shadowColor = realm.accent;
+  ctx.shadowBlur = 8 * scale;
+
+  // Simple character: robed figure
+  const headR = 7 * scale;
+  const bodyW = 14 * scale;
+  const bodyH = 16 * scale;
+
+  // Robe (body)
+  ctx.fillStyle = realm.accent;
+  ctx.beginPath();
+  ctx.moveTo(sx - bodyW / 2, sy + headR * 2 + 2 * scale);
+  ctx.lineTo(sx + bodyW / 2, sy + headR * 2 + 2 * scale);
+  ctx.lineTo(sx + bodyW / 2 + 3 * scale, sy + sh);
+  ctx.lineTo(sx - bodyW / 2 - 3 * scale, sy + sh);
+  ctx.closePath();
+  ctx.fill();
+
+  // Head
+  ctx.fillStyle = '#f5deb3';
+  ctx.beginPath();
+  ctx.arc(sx, sy + headR + 2 * scale, headR, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Eyes
+  ctx.fillStyle = '#333';
+  const eyeOff = player.facingLeft ? -2.5 : 2.5;
+  ctx.beginPath();
+  ctx.arc(sx + (eyeOff - 1.5) * scale, sy + headR + 1 * scale, 1.2 * scale, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(sx + (eyeOff + 1.5) * scale, sy + headR + 1 * scale, 1.2 * scale, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Boost effect
+  if (player.boostTimer > 0) {
+    ctx.fillStyle = '#ff8800';
+    ctx.globalAlpha = 0.4;
+    const flameH = (8 + Math.random() * 4) * scale;
+    ctx.beginPath();
+    ctx.moveTo(sx - 5 * scale, sy + sh);
+    ctx.lineTo(sx, sy + sh + flameH);
+    ctx.lineTo(sx + 5 * scale, sy + sh);
+    ctx.closePath();
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+
+  ctx.shadowBlur = 0;
+}
+
+function drawHUD() {
+  const realm = REALMS[realmIndex];
+
+  // Score
+  ctx.fillStyle = '#fff';
+  ctx.font = `bold ${16 * scale}px monospace`;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  ctx.fillText(`${score}`, 15 * scale, 15);
+
+  // Floor
+  ctx.fillStyle = realm.accent;
+  ctx.font = `${12 * scale}px monospace`;
+  ctx.fillText(`${floor}F`, 15 * scale, 35);
+
+  // Hi-Score
+  ctx.fillStyle = '#888';
+  ctx.font = `${10 * scale}px monospace`;
+  ctx.textAlign = 'right';
+  ctx.fillText(`HI: ${highScore}`, W - 15 * scale, 35);
+
+  // Realm name
+  ctx.fillStyle = realm.accent;
+  ctx.font = `bold ${11 * scale}px monospace`;
+  ctx.textAlign = 'center';
+  ctx.fillText(realm.name, W / 2, 15);
+  ctx.fillStyle = 'rgba(255,255,255,0.4)';
+  ctx.font = `${9 * scale}px monospace`;
+  ctx.fillText(realm.nameEn, W / 2, 30);
+
+  // Pause icon (top-right)
+  ctx.fillStyle = 'rgba(255,255,255,0.3)';
+  ctx.font = `${20 * scale}px monospace`;
+  ctx.textAlign = 'right';
+  ctx.fillText('||', W - 12, 20);
+
+  // Collected zen chars (bottom)
+  if (zenCollected.length > 0) {
+    const display = zenCollected.slice(-10);
+    ctx.fillStyle = 'rgba(255,215,0,0.6)';
+    ctx.font = `${13 * scale}px serif`;
+    ctx.textAlign = 'center';
+    ctx.fillText(display.join(' '), W / 2, H - 20);
+  }
+
+  // Power-up indicators
+  let indicatorY = 55;
+  if (player.shieldTimer > 0) {
+    ctx.fillStyle = '#44aaff';
+    ctx.font = `${10 * scale}px monospace`;
+    ctx.textAlign = 'left';
+    ctx.fillText(`護盾 ${Math.ceil(player.shieldTimer / 60)}s`, 15 * scale, indicatorY);
+    indicatorY += 15;
+  }
+  if (player.boostTimer > 0) {
+    ctx.fillStyle = '#ff8800';
+    ctx.font = `${10 * scale}px monospace`;
+    ctx.textAlign = 'left';
+    ctx.fillText(`加速 ${Math.ceil(player.boostTimer / 60)}s`, 15 * scale, indicatorY);
+    indicatorY += 15;
+  }
+  if (player.doubleJumpActive) {
+    ctx.fillStyle = '#00ffaa';
+    ctx.font = `${10 * scale}px monospace`;
+    ctx.textAlign = 'left';
+    ctx.fillText('二段跳', 15 * scale, indicatorY);
+  }
+}
+
+function drawMenu() {
+  drawBg(0);
+  const t = Date.now() / 1000;
+
+  // Title
+  ctx.shadowColor = '#ffd700';
+  ctx.shadowBlur = 20;
+  ctx.fillStyle = '#ffd700';
+  ctx.font = `bold ${38 * scale}px serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('輪迴塔', W / 2, H * 0.25);
+  ctx.shadowBlur = 0;
+
+  ctx.fillStyle = 'rgba(255,255,255,0.6)';
+  ctx.font = `${14 * scale}px monospace`;
+  ctx.fillText('Tower of Samsara', W / 2, H * 0.32);
+
+  // Decorative floating characters
+  for (let i = 0; i < 6; i++) {
+    const cx = W / 2 + Math.sin(t + i) * W * 0.3;
+    const cy = H * 0.45 + Math.cos(t * 0.7 + i * 1.5) * 30;
+    ctx.globalAlpha = 0.15;
+    ctx.fillStyle = REALMS[i].accent;
+    ctx.font = `${20 * scale}px serif`;
+    ctx.fillText(ZEN_CHARS[i], cx, cy);
+  }
+  ctx.globalAlpha = 1;
+
+  // Six realm names
+  ctx.font = `${10 * scale}px monospace`;
+  for (let i = 0; i < 6; i++) {
+    ctx.fillStyle = REALMS[i].accent;
+    ctx.globalAlpha = 0.5;
+    const rx = W / 2 + (i - 2.5) * 55 * scale;
+    ctx.fillText(REALMS[i].name, rx, H * 0.53);
+  }
+  ctx.globalAlpha = 1;
+
+  // Instructions
+  ctx.fillStyle = '#aaa';
+  ctx.font = `${11 * scale}px monospace`;
+  const lines = [
+    '← → / A D / 觸控滑動移動',
+    '↑ / W / SPACE / 點擊跳躍',
+    'ESC 暫停',
+    '',
+    '收集禪字，超越六道輪迴',
+    '攀登越高，境界越深',
+  ];
+  lines.forEach((line, i) => {
+    ctx.fillText(line, W / 2, H * 0.62 + i * 18 * scale);
+  });
+
+  // High scores
+  if (highScore > 0 || bestFloor > 0) {
+    ctx.fillStyle = '#ffd700';
+    ctx.font = `${11 * scale}px monospace`;
+    ctx.fillText(`最高分 ${highScore} | 最高 ${bestFloor}F`, W / 2, H * 0.82);
+  }
+
+  // Start prompt
+  const blink = Math.sin(Date.now() / 300) > 0;
+  if (blink) {
+    ctx.fillStyle = '#fff';
+    ctx.font = `${14 * scale}px monospace`;
+    ctx.fillText('點擊 / Enter 開始修行', W / 2, H * 0.9);
+  }
+}
+
+function drawPaused() {
+  ctx.fillStyle = 'rgba(0,0,0,0.6)';
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.fillStyle = REALMS[realmIndex].accent;
+  ctx.font = `bold ${32 * scale}px serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('暫停', W / 2, H / 2 - 20);
+
+  const blink = Math.sin(Date.now() / 300) > 0;
+  if (blink) {
+    ctx.fillStyle = '#fff';
+    ctx.font = `${14 * scale}px monospace`;
+    ctx.fillText('按 ESC 或點擊 || 繼續', W / 2, H / 2 + 30);
+  }
+}
+
+function drawGameOver() {
+  ctx.fillStyle = 'rgba(0,0,0,0.7)';
+  ctx.fillRect(0, 0, W, H);
+
+  const realm = REALMS[realmIndex];
+
+  // Title
+  ctx.shadowColor = realm.accent;
+  ctx.shadowBlur = 15;
+  ctx.fillStyle = realm.accent;
+  ctx.font = `bold ${30 * scale}px serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('墮入輪迴', W / 2, H * 0.25);
+  ctx.shadowBlur = 0;
+
+  // Score
+  ctx.fillStyle = '#fff';
+  ctx.font = `${18 * scale}px monospace`;
+  ctx.fillText(`${score}`, W / 2, H * 0.35);
+
+  ctx.fillStyle = '#888';
+  ctx.font = `${12 * scale}px monospace`;
+  ctx.fillText(`${floor}F | ${realm.name}`, W / 2, H * 0.42);
+
+  // New high score
+  if (score >= highScore && score > 0) {
+    ctx.fillStyle = '#ffd700';
+    ctx.font = `bold ${14 * scale}px monospace`;
+    ctx.fillText('NEW RECORD!', W / 2, H * 0.49);
+  }
+
+  // Collected characters
+  if (zenCollected.length > 0) {
+    ctx.fillStyle = 'rgba(255,215,0,0.7)';
+    ctx.font = `${14 * scale}px serif`;
+    const display = zenCollected.slice(-16).join(' ');
+    ctx.fillText(display, W / 2, H * 0.58);
+    ctx.fillStyle = '#888';
+    ctx.font = `${10 * scale}px monospace`;
+    ctx.fillText(`收集 ${zenCollected.length} 個禪字`, W / 2, H * 0.64);
+  }
+
+  // Restart
+  const blink = Math.sin(Date.now() / 300) > 0;
+  if (blink) {
+    ctx.fillStyle = '#fff';
+    ctx.font = `${14 * scale}px monospace`;
+    ctx.fillText('點擊 / Enter 再度修行', W / 2, H * 0.78);
+  }
+
+  // Best
+  ctx.fillStyle = '#666';
+  ctx.font = `${10 * scale}px monospace`;
+  ctx.fillText(`最高 ${highScore} | ${bestFloor}F`, W / 2, H * 0.88);
+}
+
+// --- Realm Transition Overlay ---
+function drawRealmTransition() {
+  if (realmTransitionAlpha <= 0) return;
+  const realm = REALMS[realmIndex];
+  ctx.fillStyle = realm.accent;
+  ctx.globalAlpha = realmTransitionAlpha * 0.3;
+  ctx.fillRect(0, 0, W, H);
+  ctx.globalAlpha = 1;
+
+  if (realmTransitionAlpha > 0.5) {
+    ctx.fillStyle = realm.accent;
+    ctx.font = `bold ${24 * scale}px serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.globalAlpha = realmTransitionAlpha;
+    ctx.fillText(realm.name, W / 2, H / 2);
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.font = `${12 * scale}px monospace`;
+    ctx.fillText(realm.nameEn, W / 2, H / 2 + 25 * scale);
+    ctx.globalAlpha = 1;
+  }
+}
+
+// --- Main Render ---
+function render() {
+  // Screen shake
+  if (screenShake > 0) {
+    ctx.save();
+    ctx.translate(
+      (Math.random() - 0.5) * screenShake * scale * 0.5,
+      (Math.random() - 0.5) * screenShake * scale * 0.5
+    );
+  }
+
+  if (state === STATE.MENU) {
+    drawMenu();
+  } else {
+    drawBg(realmIndex);
+
+    const camY = cameraY;
+    platforms.forEach(plat => drawPlatform(plat, camY, realmIndex));
+    drawParticles(camY);
+    drawPlayer(camY);
+    drawHUD();
+    drawRealmTransition();
+
+    if (state === STATE.PAUSED) drawPaused();
+    if (state === STATE.GAMEOVER) drawGameOver();
+  }
+
+  if (screenShake > 0) ctx.restore();
+}
+
+// --- Game Loop (Fixed Timestep) ---
+const FIXED_DT = 1000 / 60;
+let lastTime = 0;
+let accumulator = 0;
+
+function gameLoop(timestamp) {
+  requestAnimationFrame(gameLoop);
+
+  if (!lastTime) { lastTime = timestamp; return; }
+  let dt = timestamp - lastTime;
+  lastTime = timestamp;
+  if (dt > 200) dt = 200; // prevent spiral of death
+
+  accumulator += dt;
+  while (accumulator >= FIXED_DT) {
+    update();
+    accumulator -= FIXED_DT;
+  }
+
+  render();
+}
+
+requestAnimationFrame(gameLoop);
+
+})();
+</script>
+</body>
+</html>
